@@ -1,0 +1,30 @@
+{
+  "name": "presko-form",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/presko-form.umd.js",
+  "module": "./dist/presko-form.js",
+  "exports": {
+    ".": {
+      "import": "./dist/presko-form.js",
+      "require": "./dist/presko-form.umd.js"
+    },
+    "./style.css": "./dist/style.css"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.3.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.2.3",
+    "vite": "^4.4.0"
+  }
+}
