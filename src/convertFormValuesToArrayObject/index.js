@@ -1,9 +1,12 @@
 export default function convertFormValuesToArrayObject(formEvent) {
-  // console.log(formEvent);
-  formEvent.currentTarget.elements.foreach((field) => {
-    console.log({
+  const formElements = Array.from(formEvent.currentTarget.elements);
+  console.log(formElements);
+  return formElements.reduce((acc, field) => {
+    if (!field.attributes.propertyname) return acc;
+    console.log({ ...acc });
+    return {
+      ...acc,
       [field.attributes.propertyname.value]: field.value,
-    });
-  });
-  console.log(formEvent.target[0].attributes.propertyname.value);
+    };
+  }, {});
 }
