@@ -1,22 +1,24 @@
 <template>
-  <form class="presko-form">
-    <slot name="title">
-      <div class="presko-form-title">{{ title }}</div>
-    </slot>
-    <div class="presko-form-fields-wrapper">
-      <component
-        v-for="field in fields"
-        :key="field.propertyName"
-        :is="field.component"
-        v-bind="field"
-        class="presko-form-field"
-        @input="emitInput"
-      />
-    </div>
-    <slot name="submit-row">
-      <component :is="submitComponent" />
-    </slot>
-  </form>
+  <div>
+    <form class="presko-form" @submit.prevent.stop="handleFormSubmit">
+      <slot name="title">
+        <div class="presko-form-title">{{ title }}</div>
+      </slot>
+      <div class="presko-form-fields-wrapper">
+        <component
+          v-for="field in fields"
+          :key="field.propertyName"
+          :is="field.component"
+          v-bind="field"
+          class="presko-form-field"
+          @input="emitInput"
+        />
+      </div>
+      <slot name="submit-row">
+        <component :is="submitComponent" />
+      </slot>
+    </form>
+  </div>
 </template>
 
 <script setup>
@@ -88,6 +90,12 @@ const emitInput = (e) => {
 //   }
 //   emit("input", input);
 // };
+
+// Handle Submit
+
+const handleFormSubmit = () => {
+  console.log("inside submit");
+};
 </script>
 
 <style scoped>
