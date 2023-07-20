@@ -9,7 +9,7 @@
         :key="field.propertyName"
         :is="field.component"
         v-bind="field"
-        class=""
+        class="presko-form-field"
         @input="emitInput"
       />
     </div>
