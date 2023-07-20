@@ -1,34 +1,53 @@
 <script setup>
 import PreskoForm from "./components/PreskoForm.vue";
+import convertFormValuesToArrayObject from "./convertFormValuesToArrayObject";
 
 const fields = [
   {
-    propertyName: "email",
+    propertyName: "poshta",
     label: "Email",
-    component: "Input",
-    type: "email",
+    component: "AppInput",
     rules: ["required", "email"],
     value: "john@example.com",
   },
-  {
-    propertyName: "option",
-    label: "Option",
-    component: "select",
-    options: ["Option 1", "Option 2"],
-    rules: ["required"],
-    value: "Option 2",
-  },
+  // {
+  //   propertyName: "option",
+  //   label: "Option",
+  //   component: "select",
+  //   options: ["Option 1", "Option 2"],
+  //   rules: ["required"],
+  //   value: "Option 2",
+  // },
   {
     propertyName: "password",
     label: "Password",
-    component: "input",
+    component: "AppInput",
     type: "password",
     rules: ["required"],
     value: "",
   },
 ];
+
+function alertSubmit(e) {
+  const resForm = convertFormValuesToArrayObject(e);
+  console.log(resForm);
+  alert(resForm);
+}
 </script>
 
 <template>
-  <PreskoForm title="Presko Form" :fields="fields" />
+  <PreskoForm
+    title="Presko Form"
+    :fields="fields"
+    submit-component="AppSubmit"
+    @submit.prevent="alertSubmit"
+  />
 </template>
+
+<style>
+input:invalid {
+  background-color: ivory;
+  border: none;
+  outline: 2px solid red;
+}
+</style>
