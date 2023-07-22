@@ -36,13 +36,14 @@ const emit = defineEmits(["input"]);
 const modelValue = ref(value);
 
 const errorMessages = ref([]);
+const hasErrors = computed(() => errorMessages.value.length > 0);
 
 watchEffect(() => {
   console.log(errorMessages.value);
 });
 
 const errorState = computed(() => ({
-  [errorProps.hasErrors]: errorMessages.value.length > 0,
+  [errorProps.hasErrors]: hasErrors,
   [errorProps.errorMessages]:
     errorProps.errorMessagesType == "string"
       ? errorMessages.value[0]
@@ -104,7 +105,7 @@ const handleInput = (e) => {
   emit("input", {
     input,
     propertyName,
-    isValid: errorMessages.value.length > 0,
+    isValid: !hasErrors,
   });
 };
 </script>

@@ -10,7 +10,7 @@
           :key="field.propertyName"
           v-bind="field"
           :error-props="errorProps"
-          @input="emitInput"
+          @input="handleInput"
         ></PreskoFormItem>
       </div>
       <slot name="submit-row">
@@ -41,16 +41,14 @@ const { fields, title, submitComponent, errorProps } = defineProps({
   },
 });
 
-let form = reactive({});
+// key: value
+let formFieldsValues = {};
+// key: isValid
+let formFieldsValidity;
 
-fields.forEach((field) => {
-  form[field.name] = field.value || "";
-});
-
-const emitInput = ({ propertyName, input, isValid }) => {
-  if (!isValid) {
-    isFormValid.value = false;
-  }
+const handleInput = ({ propertyName, input, isValid }) => {
+  formFieldsValues[propertyName] = input;
+  formFieldsValues[propertyName] = isValid;
   emit("input", { [propertyName]: input });
 };
 
