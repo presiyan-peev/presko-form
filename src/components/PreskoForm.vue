@@ -55,7 +55,11 @@ const handleInput = ({ propertyName, input, isValid }) => {
 // Handle Submit
 
 const handleFormSubmit = () => {
-  console.log("inside submit");
+  if (Object.values(formFieldsValidity).includes(false)) {
+    emit("submit:reject");
+  } else {
+    emit("submit", JSON.parse(JSON.stringify(formFieldsValues)));
+  }
 };
 </script>
 

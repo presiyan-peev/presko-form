@@ -32,6 +32,10 @@ function alertSubmit(e) {
   const resForm = convertFormValuesToArrayObject(e);
   alert(JSON.stringify(resForm));
 }
+
+function alertFormValidationFail() {
+  alert("validation failed");
+}
 </script>
 
 <template>
@@ -40,6 +44,7 @@ function alertSubmit(e) {
     :fields="fields"
     submit-component="AppSubmit"
     @submit.prevent="alertSubmit"
+    @submit:reject="alertFormValidationFail"
   />
 </template>
 
