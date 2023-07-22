@@ -11,16 +11,25 @@
 import { ref, watchEffect } from "vue";
 import Validation from "../validation";
 
-const { propertyName, label, component, type, rules, value, validators } =
-  defineProps({
-    propertyName: String,
-    label: String,
-    component: String,
-    type: String,
-    rules: Array,
-    value: String,
-    validators: Array,
-  });
+const {
+  propertyName,
+  label,
+  component,
+  type,
+  rules,
+  value,
+  validators,
+  errorProps,
+} = defineProps({
+  propertyName: String,
+  label: String,
+  component: String,
+  type: String,
+  rules: Array,
+  value: String,
+  validators: Array,
+  errorProps: Object,
+});
 
 const emit = defineEmits(["input"]);
 
@@ -67,7 +76,14 @@ const validateWithBuiltInRules = (e) => {
 };
 
 const handleInput = (e) => {
-  const input = typeof e == "string" ? e : e.target.value;
+  let input = null;
+  try {
+    input = typeof e == "string" ? e : e.target.value;
+  } catch (error) {
+    throw new Error(
+      "Field component must return a string or a native input event object"
+    );
+  }
   if (!!validators) {
     validateWithCustomValidator(input);
   }

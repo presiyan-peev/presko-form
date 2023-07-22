@@ -9,6 +9,7 @@
           v-for="field in fields"
           :key="field.propertyName"
           v-bind="field"
+          :error-props="errorProps"
           @input="emitInput"
         ></PreskoFormItem>
       </div>
