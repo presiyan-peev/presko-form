@@ -44,11 +44,11 @@ const { fields, title, submitComponent, errorProps } = defineProps({
 // key: value
 let formFieldsValues = {};
 // key: isValid
-let formFieldsValidity;
+let formFieldsValidity = {};
 
 const handleInput = ({ propertyName, input, isValid }) => {
   formFieldsValues[propertyName] = input;
-  formFieldsValues[propertyName] = isValid;
+  formFieldsValidity[propertyName] = isValid;
   emit("input", { [propertyName]: input });
 };
 
