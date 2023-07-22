@@ -22,9 +22,10 @@
 
 <script setup>
 import PreskoFormItem from "./PreskoFormItem.vue";
-import { reactive } from "vue";
+import { ref, reactive } from "vue";
 
 const emit = defineEmits(["input"]);
+const isFormValid = ref(null);
 
 const { fields, title, submitComponent, errorProps } = defineProps({
   fields: Array,
@@ -46,7 +47,10 @@ fields.forEach((field) => {
   form[field.name] = field.value || "";
 });
 
-const emitInput = ({ propertyName, input }) => {
+const emitInput = ({ propertyName, input, isValid }) => {
+  if (!isValid) {
+    isFormValid.value = false;
+  }
   emit("input", { [propertyName]: input });
 };
 

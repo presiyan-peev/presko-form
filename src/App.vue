@@ -29,7 +29,6 @@ const fields = [
 ];
 
 function alertSubmit(e) {
-  console.log("external submit", e);
   const resForm = convertFormValuesToArrayObject(e);
   alert(JSON.stringify(resForm));
 }

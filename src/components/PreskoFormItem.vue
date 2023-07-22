@@ -2,13 +2,14 @@
   <component
     :is="component"
     class="presko-form-field"
-    :model-value="value"
+    :model-value="modelValue"
+    v-bind="errorState"
     @input="handleInput"
   />
 </template>
 
 <script setup>
-import { ref, watchEffect } from "vue";
+import { computed, ref, watchEffect } from "vue";
 import Validation from "../validation";
 
 const {
@@ -32,6 +33,7 @@ const {
 });
 
 const emit = defineEmits(["input"]);
+const modelValue = ref(value);
 
 const errorMessages = ref([]);
 
@@ -39,11 +41,19 @@ watchEffect(() => {
   console.log(errorMessages.value);
 });
 
+const errorState = computed(() => ({
+  [errorProps.hasErrors]: errorMessages.value.length > 0,
+  [errorProps.errorMessages]:
+    errorProps.errorMessagesType == "string"
+      ? errorMessages.value[0]
+      : errorMessages.value,
+}));
+
 const updateErrorMessages = (validity) => {
   if (validity !== true && validity != undefined) {
     errorMessages.value.push(validity);
   }
-  // else - input is valid
+  // else - input passed validation check
 };
 
 const validateWithCustomValidator = (e) => {
@@ -58,7 +68,6 @@ const validateWithCustomValidator = (e) => {
 const validateWithBuiltInRules = (e) => {
   if (!Array.isArray(rules)) return;
   rules.forEach((rule) => {
-    console.log({ rule, v: Validation.required(e) });
     if (typeof rule == "string") {
       const validity = Validation[rule](e, label);
       updateErrorMessages(validity);
@@ -84,6 +93,8 @@ const handleInput = (e) => {
       "Field component must return a string or a native input event object"
     );
   }
+  modelValue.value = input;
+  errorMessages.value = [];
   if (!!validators) {
     validateWithCustomValidator(input);
   }
