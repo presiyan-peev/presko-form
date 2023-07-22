@@ -1,6 +1,6 @@
 <template>
   <component
-    :is="component"
+    :is="field.component"
     class="presko-form-field"
     :model-value="modelValue"
     v-bind="errorState"
@@ -10,80 +10,23 @@
 
 <script setup>
 import { computed, ref, watchEffect } from "vue";
-import Validation from "../validation";
 
-const {
-  propertyName,
-  label,
-  component,
-  type,
-  rules,
-  value,
-  validators,
-  errorProps,
-} = defineProps({
-  propertyName: String,
-  label: String,
-  component: String,
-  type: String,
-  rules: Array,
-  value: String,
-  validators: Array,
+const { field, errorProps, validityState } = defineProps({
+  field: Object,
   errorProps: Object,
+  validityState: Object,
 });
 
 const emit = defineEmits(["input"]);
-const modelValue = ref(value);
-
-const errorMessages = ref([]);
-const hasErrors = computed(() => errorMessages.value.length > 0);
-
-watchEffect(() => {
-  console.log(errorMessages.value);
-});
+const modelValue = ref(field.value);
 
 const errorState = computed(() => ({
-  [errorProps.hasErrors]: hasErrors,
+  [errorProps.hasErrors]: validityState.hasErrors,
   [errorProps.errorMessages]:
-    errorProps.errorMessagesType == "string"
-      ? errorMessages.value[0]
-      : errorMessages.value,
+    errorProps.errorMessagesType !== "string" && validityState.errMsg.length > 0
+      ? validityState.errMsg[0]
+      : validityState.errMsg,
 }));
-
-const updateErrorMessages = (validity) => {
-  if (validity !== true && validity != undefined) {
-    errorMessages.value.push(validity);
-  }
-  // else - input passed validation check
-};
-
-const validateWithCustomValidator = (e) => {
-  for (validationFn of validation) {
-    if (typeof validationFn == "function") {
-      const validity = validation(e);
-      updateErrorMessages(validity);
-    }
-  }
-};
-
-const validateWithBuiltInRules = (e) => {
-  if (!Array.isArray(rules)) return;
-  rules.forEach((rule) => {
-    if (typeof rule == "string") {
-      const validity = Validation[rule](e, label);
-      updateErrorMessages(validity);
-    }
-    if (typeof rule == "object") {
-      const { name, customErrorMsg } = rule;
-      const validity = Validation[name](e, label, customErrorMsg);
-      updateErrorMessages(validity);
-    }
-    if (typeof rule == RegExp) {
-      const validity = Validation.matchRegex(e, label, customErrorMsg, rule);
-      updateErrorMessages(validity);
-    }
-  });
-};
 
 const handleInput = (e) => {
   let input = null;
@@ -95,17 +38,10 @@ const handleInput = (e) => {
     );
   }
   modelValue.value = input;
-  errorMessages.value = [];
-  if (!!validators) {
-    validateWithCustomValidator(input);
-  }
-  if (!!rules) {
-    validateWithBuiltInRules(input);
-  }
+
   emit("input", {
     input,
-    propertyName,
-    isValid: !hasErrors,
+    field,
   });
 };
 </script>

@@ -8,8 +8,12 @@
         <PreskoFormItem
           v-for="field in fields"
           :key="field.propertyName"
-          v-bind="field"
+          :field="field"
           :error-props="errorProps"
+          :validity-state="{
+            hasErrors: !formFieldsValidity[field.propertyName],
+            errMsg: formFieldsErrorMessages[field.propertyName],
+          }"
           @input="handleInput"
         ></PreskoFormItem>
       </div>
@@ -22,10 +26,16 @@
 
 <script setup>
 import PreskoFormItem from "./PreskoFormItem.vue";
-import { ref, reactive } from "vue";
+import { useFormValidation } from "../composables/useFormValidation";
+
+const {
+  formFieldsValues,
+  formFieldsValidity,
+  formFieldsErrorMessages,
+  validateField,
+} = useFormValidation();
 
 const emit = defineEmits(["input"]);
-const isFormValid = ref(null);
 
 const { fields, title, submitComponent, errorProps } = defineProps({
   fields: Array,
@@ -41,15 +51,9 @@ const { fields, title, submitComponent, errorProps } = defineProps({
   },
 });
 
-// key: value
-let formFieldsValues = {};
-// key: isValid
-let formFieldsValidity = {};
-
-const handleInput = ({ propertyName, input, isValid }) => {
-  formFieldsValues[propertyName] = input;
-  formFieldsValidity[propertyName] = isValid;
-  emit("input", { [propertyName]: input });
+const handleInput = ({ input, field }) => {
+  validateField(field, input);
+  emit("input", { [field.propertyName]: input });
 };
 
 // Handle Submit
