@@ -1,7 +1,7 @@
 import { reactive, computed } from "vue";
 import Validation from "../validation";
 
-export function useFormValidation() {
+export function useFormValidation(fields) {
   // key: value
   let formFieldsValues = reactive({});
   // key: isValid
@@ -65,7 +65,11 @@ export function useFormValidation() {
     }
   };
 
-  const validateForm = (field, input) => {};
+  const validateForm = () => {
+    fields.forEach((field) => {
+      validateField(field, formFieldsValues[field.propertyName]);
+    });
+  };
 
   return {
     formFieldsValues,
