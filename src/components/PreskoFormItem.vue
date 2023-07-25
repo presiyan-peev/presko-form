@@ -37,6 +37,7 @@ const handleInput = (e) => {
       "Field component must return a string or a native input event object"
     );
   }
+  console.log({ input });
   modelValue.value = input;
 
   emit("input", {

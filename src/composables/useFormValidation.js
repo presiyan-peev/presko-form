@@ -18,7 +18,7 @@ export function useFormValidation() {
   };
 
   const resetValidationState = (field) => {
-    formFieldsValidity[field.propertyName] = true;
+    formFieldsValidity[field.propertyName] = undefined;
     formFieldsErrorMessages[field.propertyName] = undefined;
   };
 

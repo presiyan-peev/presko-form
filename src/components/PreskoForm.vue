@@ -11,7 +11,7 @@
           :field="field"
           :error-props="errorProps"
           :validity-state="{
-            hasErrors: !formFieldsValidity[field.propertyName],
+            hasErrors: formFieldsValidity[field.propertyName] == false,
             errMsg: formFieldsErrorMessages[field.propertyName],
           }"
           @input="handleInput"
