@@ -9,7 +9,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watchEffect } from "vue";
+import { computed, ref } from "vue";
 
 const { field, errorProps, validityState } = defineProps({
   field: Object,

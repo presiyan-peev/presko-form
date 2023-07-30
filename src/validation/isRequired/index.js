@@ -3,6 +3,7 @@ export default function isRequired(
   label = "This field",
   customErrorMsg
 ) {
+  console.log({ value, label, customErrorMsg });
   if (value !== null && value !== "" && value !== undefined) {
     return true;
   }

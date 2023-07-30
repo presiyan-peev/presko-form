@@ -28,7 +28,7 @@
 import PreskoFormItem from "./PreskoFormItem.vue";
 import { useFormValidation } from "../composables/useFormValidation";
 
-const emit = defineEmits(["input"]);
+const emit = defineEmits(["input", "submit", "submit:reject"]);
 
 const { fields, title, submitComponent, errorProps } = defineProps({
   fields: Array,
@@ -53,6 +53,8 @@ const {
 } = useFormValidation(fields);
 
 const handleInput = ({ input, field }) => {
+  Object.assign(formFieldsValues, { [field.propertyName]: input });
+  console.log({ formFieldsValues });
   validateField(field, input);
   emit("input", { [field.propertyName]: input });
 };

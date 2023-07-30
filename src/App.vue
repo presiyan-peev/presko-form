@@ -29,8 +29,7 @@ const fields = [
 ];
 
 function alertSubmit(e) {
-  const resForm = convertFormValuesToArrayObject(e);
-  alert(JSON.stringify(resForm));
+  alert(JSON.stringify(e));
 }
 
 function alertFormValidationFail() {
@@ -43,7 +42,7 @@ function alertFormValidationFail() {
     title="Presko Form"
     :fields="fields"
     submit-component="AppSubmit"
-    @submit.prevent="alertSubmit"
+    @submit="alertSubmit"
     @submit:reject="alertFormValidationFail"
   />
 </template>
