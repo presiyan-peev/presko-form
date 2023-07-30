@@ -54,7 +54,6 @@ const {
 
 const handleInput = ({ input, field }) => {
   Object.assign(formFieldsValues, { [field.propertyName]: input });
-  console.log({ formFieldsValues });
   validateField(field, input);
   emit("input", { [field.propertyName]: input });
 };

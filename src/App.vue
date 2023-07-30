@@ -1,6 +1,5 @@
 <script setup>
 import PreskoForm from "./components/PreskoForm.vue";
-import convertFormValuesToArrayObject from "./convertFormValuesToArrayObject";
 
 const fields = [
   {

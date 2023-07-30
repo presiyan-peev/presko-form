@@ -9,6 +9,16 @@ export function useFormValidation(fields) {
   // key: errMsg
   let formFieldsErrorMessages = reactive({});
 
+  const initFormFieldsValues = () => {
+    fields.forEach((field) => {
+      if (field.value != undefined && !!field.value) {
+        Object.assign(formFieldsValues, { [field.propertyName]: field.value });
+      }
+    });
+  };
+
+  initFormFieldsValues();
+
   const updateValidationState = (field, validity) => {
     if (validity !== true && validity != undefined) {
       formFieldsValidity[field.propertyName] = false;
