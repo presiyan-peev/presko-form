@@ -1,7 +1,6 @@
 export function matchRegex(value, label = "This field", customErrorMsg, regex) {
-  const isValid = value.match(regex);
+  const isValid = regex.test(value);
 
-  console.log({ value, label, customErrorMsg });
   if (isValid == true) {
     return true;
   }
@@ -14,17 +13,18 @@ export function matchRegex(value, label = "This field", customErrorMsg, regex) {
 export function isEmail(value, label, customErrorMsg) {
   const EMAIL_REGEX =
     /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(\.[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])*$/;
-  return matchRegex(...arguments, EMAIL_REGEX);
+  console.log({ EMAIL_REGEX });
+  return matchRegex(value, label, customErrorMsg, EMAIL_REGEX);
 }
 
 export function isDomain(value, label, customErrorMsg) {
-  return matchRegex(...arguments, "regex");
+  return matchRegex(value, label, customErrorMsg, "regex");
 }
 
 export function isIPv4Address(value, label, customErrorMsg) {
-  return matchRegex(...arguments, "regex");
+  return matchRegex(value, label, customErrorMsg, "regex");
 }
 
 export function isIPv6Address(value, label, customErrorMsg) {
-  return matchRegex(...arguments, "regex");
+  return matchRegex(value, label, customErrorMsg, "regex");
 }
