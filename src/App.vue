@@ -8,6 +8,9 @@ const fields = [
     component: "AppInput",
     rules: ["required", "email"],
     value: "john@example.com",
+    props: {
+      label: "Email",
+    },
   },
   // {
   //   propertyName: "option",
@@ -24,6 +27,9 @@ const fields = [
     type: "password",
     rules: ["required"],
     value: "",
+    props: {
+      label: "Password",
+    },
   },
 ];
 

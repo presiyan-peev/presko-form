@@ -1,12 +1,22 @@
 <template>
   <div>
-    <input v-bind="$attrs" :class="{ error: error }" v-model="modelValue" />
+    <label :for="label">{{ label }}</label>
+    <input
+      v-bind="$attrs"
+      :class="{ error: error }"
+      v-model="modelValue"
+      :id="label"
+    />
     <div>{{ errorMessages }}</div>
   </div>
 </template>
 
 <script setup>
-const { error, errorMessages } = defineProps(["error", "errorMessages"]);
+const { error, errorMessages, label } = defineProps([
+  "error",
+  "errorMessages",
+  "label",
+]);
 const modelValue = defineModel();
 </script>
 

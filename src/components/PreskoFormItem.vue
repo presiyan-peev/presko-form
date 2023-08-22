@@ -3,7 +3,7 @@
     :is="field.component"
     class="presko-form-field"
     :model-value="modelValue"
-    v-bind="errorState"
+    v-bind="{ ...errorState, ...field.props }"
     @input="handleInput"
   />
 </template>
