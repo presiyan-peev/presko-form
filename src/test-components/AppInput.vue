@@ -4,7 +4,8 @@
     <input
       v-bind="$attrs"
       :class="{ error: error }"
-      v-model="modelValue"
+      :value="modelValue"
+      @input.stop="emitInput"
       :id="label"
     />
     <div>{{ errorMessages }}</div>
@@ -12,12 +13,17 @@
 </template>
 
 <script setup>
-const { error, errorMessages, label } = defineProps([
+const { error, errorMessages, label, modelValue } = defineProps([
   "error",
   "errorMessages",
   "label",
+  "modelValue",
 ]);
-const modelValue = defineModel();
+
+const emit = defineEmits("update:model-value");
+function emitInput(e) {
+  emit("update:model-value", e.target.value);
+}
 </script>
 
 <style scoped>

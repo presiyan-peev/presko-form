@@ -81,11 +81,18 @@ export function useFormValidation(fields) {
     });
   };
 
+  const validateFormPurely = (form) => {
+    for (const field in form) {
+      validateField(field, form[field]);
+    }
+  };
+
   return {
     formFieldsValues,
     formFieldsValidity,
     formFieldsErrorMessages,
     validateField,
     validateForm,
+    validateFormPurely,
   };
 }

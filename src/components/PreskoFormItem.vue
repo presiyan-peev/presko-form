@@ -2,14 +2,13 @@
   <component
     :is="field.component"
     class="presko-form-field"
-    :model-value="modelValue"
+    v-model="modelValue"
     v-bind="{ ...errorState, ...field.props }"
-    @input="handleInput"
   />
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed } from "vue";
 
 const { field, errorProps, validityState } = defineProps({
   field: Object,
@@ -17,8 +16,8 @@ const { field, errorProps, validityState } = defineProps({
   validityState: Object,
 });
 
-const emit = defineEmits(["input"]);
-const modelValue = ref(field.value);
+const emit = defineEmits(["input", "update:model-value"]);
+const modelValue = defineModel();
 
 const errorState = computed(() => ({
   [errorProps.hasErrors]: validityState.hasErrors,
@@ -27,14 +26,4 @@ const errorState = computed(() => ({
       ? validityState.errMsg[0]
       : validityState.errMsg,
 }));
-
-const handleInput = (input) => {
-  console.log({ input });
-  modelValue.value = input;
-
-  emit("input", {
-    input,
-    field,
-  });
-};
 </script>

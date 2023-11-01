@@ -49,6 +49,10 @@ const fields = [
   },
 ];
 
+let form = {
+  name: "dido",
+};
+
 function alertSubmit(e) {
   alert(JSON.stringify(e));
 }
@@ -60,6 +64,7 @@ function alertFormValidationFail() {
 
 <template>
   <PreskoForm
+    v-model="form"
     title="Presko Form"
     :fields="fields"
     submit-component="AppSubmit"

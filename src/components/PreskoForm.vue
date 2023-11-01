@@ -8,13 +8,13 @@
         <PreskoFormItem
           v-for="field in fields"
           :key="field.propertyName"
+          v-model="modelValue[field.propertyName]"
           :field="field"
           :error-props="errorProps"
           :validity-state="{
             hasErrors: formFieldsValidity[field.propertyName] == false,
             errMsg: formFieldsErrorMessages[field.propertyName],
           }"
-          @input="handleInput"
         ></PreskoFormItem>
       </div>
       <slot name="submit-row">
@@ -33,6 +33,8 @@
 import PreskoFormItem from "./PreskoFormItem.vue";
 import { useFormValidation } from "../composables/useFormValidation";
 
+const modelValue = defineModel();
+
 const { fields, title, submitComponent, errorProps } = defineProps({
   fields: Array,
   title: String,
@@ -49,31 +51,28 @@ const { fields, title, submitComponent, errorProps } = defineProps({
   },
 });
 
-const emit = defineEmits(["input", "submit", "submit:reject"]);
+const emit = defineEmits([
+  "input",
+  "update:model-value",
+  "submit",
+  "submit:reject",
+]);
 
 const {
   formFieldsValues,
   formFieldsValidity,
   formFieldsErrorMessages,
-  validateField,
-  validateForm,
+  validateFormPurely,
 } = useFormValidation(fields);
-
-const handleInput = ({ input, field }) => {
-  Object.assign(formFieldsValues, { [field.propertyName]: input });
-  validateField(field, input);
-  emit("input", { [field.propertyName]: input });
-  emit(`update:${field.propertyName}`, input);
-};
 
 // Handle Submit
 
 const handleFormSubmit = () => {
-  validateForm();
+  validateFormPurely(modelValue.value);
   if (Object.values(formFieldsValidity).includes(false)) {
     emit("submit:reject");
   } else {
-    emit("submit", JSON.parse(JSON.stringify(formFieldsValues)));
+    emit("submit", JSON.parse(JSON.stringify(modelValue.value)));
   }
 };
 </script>
