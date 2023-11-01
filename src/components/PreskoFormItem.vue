@@ -28,15 +28,7 @@ const errorState = computed(() => ({
       : validityState.errMsg,
 }));
 
-const handleInput = (e) => {
-  let input = null;
-  try {
-    input = typeof e == "string" ? e : e.target.value;
-  } catch (error) {
-    throw new Error(
-      "Field component must return a string or a native input event object"
-    );
-  }
+const handleInput = (input) => {
   console.log({ input });
   modelValue.value = input;
 

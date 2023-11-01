@@ -3,8 +3,25 @@ import PreskoForm from "./components/PreskoForm.vue";
 
 const fields = [
   {
+    propertyName: "name",
+    component: "AppInput",
+    rules: ["required"],
+    value: "",
+    props: {
+      label: "Name",
+    },
+  },
+  {
+    propertyName: "last-name",
+    component: "AppInput",
+    rules: ["required"],
+    value: "",
+    props: {
+      label: "Last Name",
+    },
+  },
+  {
     propertyName: "poshta",
-    label: "Email",
     component: "AppInput",
     rules: ["required", "email"],
     value: "john@example.com",
@@ -22,7 +39,6 @@ const fields = [
   // },
   {
     propertyName: "password",
-    label: "Password",
     component: "AppInput",
     type: "password",
     rules: ["required"],
