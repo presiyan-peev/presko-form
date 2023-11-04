@@ -64,7 +64,6 @@ function alertFormValidationFail() {
 
 <template>
   <PreskoForm
-    v-model="form"
     title="Presko Form"
     :fields="fields"
     submit-component="AppSubmit"

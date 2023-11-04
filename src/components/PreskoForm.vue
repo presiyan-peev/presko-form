@@ -33,7 +33,7 @@
 import PreskoFormItem from "./PreskoFormItem.vue";
 import { useFormValidation } from "../composables/useFormValidation";
 
-const modelValue = defineModel();
+const modelValue = defineModel({ default: {}, local: true });
 
 const { fields, title, submitComponent, errorProps } = defineProps({
   fields: Array,
