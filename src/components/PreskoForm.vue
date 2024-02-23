@@ -5,17 +5,23 @@
         <div class="presko-form-title">{{ title }}</div>
       </slot>
       <div class="presko-form-fields-wrapper">
-        <PreskoFormItem
-          v-for="field in fields"
-          :key="field.propertyName"
-          v-model="modelValue[field.propertyName]"
-          :field="field"
-          :error-props="errorProps"
-          :validity-state="{
-            hasErrors: formFieldsValidity[field.propertyName] == false,
-            errMsg: formFieldsErrorMessages[field.propertyName],
-          }"
-        ></PreskoFormItem>
+        <div v-for="(field, i) in fields" :key="i">
+          <PreskoForm
+            v-if="field.subForm"
+            v-model="modelValue[field.subForm]"
+            :fields="field.fields"
+          />
+          <PreskoFormItem
+            v-else
+            v-model="modelValue[field.propertyName]"
+            :field="field"
+            :error-props="errorProps"
+            :validity-state="{
+              hasErrors: formFieldsValidity[field.propertyName] == false,
+              errMsg: formFieldsErrorMessages[field.propertyName],
+            }"
+          ></PreskoFormItem>
+        </div>
       </div>
       <slot name="submit-row">
         <component
@@ -32,8 +38,9 @@
 <script setup>
 import PreskoFormItem from "./PreskoFormItem.vue";
 import { useFormValidation } from "../composables/useFormValidation";
+import { watch } from "vue";
 
-const modelValue = defineModel({ default: {}, local: true });
+const modelValue = defineModel("modelValue", { default: {}, local: true });
 
 const { fields, title, submitComponent, errorProps } = defineProps({
   fields: Array,
@@ -57,6 +64,13 @@ const emit = defineEmits([
   "submit",
   "submit:reject",
 ]);
+
+watch(
+  () => modelValue,
+  (v) => {
+    console.log({ v });
+  }
+);
 
 const {
   formFieldsValues,

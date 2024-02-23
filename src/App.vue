@@ -21,13 +21,27 @@ const fields = [
     },
   },
   {
-    propertyName: "poshta",
-    component: "AppInput",
-    rules: ["required", "email"],
-    value: "john@example.com",
-    props: {
-      label: "Email",
-    },
+    subForm: "contacts",
+    fields: [
+      {
+        propertyName: "poshta",
+        component: "AppInput",
+        rules: ["required", "email"],
+        value: "john@example.com",
+        props: {
+          label: "Email",
+        },
+      },
+      {
+        propertyName: "phone",
+        component: "AppInput",
+        rules: ["required"],
+        value: "0883",
+        props: {
+          label: "Phone",
+        },
+      },
+    ],
   },
   // {
   //   propertyName: "option",
@@ -51,9 +65,11 @@ const fields = [
 
 let form = {
   name: "dido",
+  contacts: {},
 };
 
 function alertSubmit(e) {
+  console.log({ form });
   alert(JSON.stringify(e));
 }
 
@@ -64,6 +80,7 @@ function alertFormValidationFail() {
 
 <template>
   <PreskoForm
+    v-model="form"
     title="Presko Form"
     :fields="fields"
     submit-component="AppSubmit"
