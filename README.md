@@ -535,3 +535,50 @@ This section can be expanded with more complex use cases and customization examp
     *   Guidance on potentially extending or wrapping the `useFormValidation` composable for highly specific needs.
 
 *(Contributions and suggestions for this section are welcome!)*
+
+## License
+
+A `LICENSE` file was not found in this project's repository. It is highly recommended to add one.
+
+For open-source projects, a permissive license like MIT is common. If an MIT license is chosen, the `README.md` badge placeholder can be updated, and a `LICENSE` file containing the MIT License text should be added to the root of the project.
+
+Example (if MIT is chosen):
+```
+MIT License
+
+Copyright (c) [Year] [Your Name/Organization]
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+Please replace `[Year]` and `[Your Name/Organization]` accordingly.
+
+## Contributing
+
+Contributions are welcome to help improve `presko-form`! If you have suggestions for new features, bug fixes, or improvements to the documentation, please feel free to contribute.
+
+Here's a general guide to contributing:
+
+1.  **Fork the Repository:** Start by forking the main `presko-form` repository to your own GitHub account.
+2.  **Create a Branch:** For any new feature or bug fix, create a new branch from the `main` (or `develop` if it exists) branch. A good branch name would be descriptive, like `feature/add-new-validation-rule` or `fix/readme-typo`.
+3.  **Make Your Changes:** Implement your changes, ensuring you follow any existing code style and add tests if applicable.
+4.  **Test Your Changes:** Ensure your changes don't break existing functionality and that any new tests pass.
+5.  **Write Clear Commit Messages:** Follow standard commit message conventions.
+6.  **Submit a Pull Request:** Push your changes to your forked repository and then open a pull request to the main `presko-form` repository. Provide a clear description of the changes in your pull request.
+
+If you're planning a larger contribution, it's a good idea to open an issue first to discuss your ideas.
