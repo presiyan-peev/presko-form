@@ -25,6 +25,7 @@ import Validation from "../validation";
  * @property {Function} validateFormPurely - Function to validate a provided data object against field configurations and update reactive validation states.
  * @property {Function} setFieldTouched - Function to set the touched state of a field.
  * @property {Function} checkFieldDirty - Function to check and update the dirty state of a field.
+ * @property {Function} updateFieldInitialValue - Function to update the initial value of a field.
  */
 export function useFormValidation(fields) {
   /** @type {Object<string, any>} */
@@ -83,6 +84,28 @@ export function useFormValidation(fields) {
   };
 
   initFormStates();
+
+  /**
+   * Updates the initial value for a field - used when the form's modelValue changes.
+   * @param {string} fieldName - The property name of the field.
+   * @param {any} value - The new initial value.
+   */
+  const updateFieldInitialValue = (fieldName, value) => {
+    if (fields && Array.isArray(fields)) {
+      const field = fields.find((f) => f.propertyName === fieldName);
+      if (field) {
+        const serializedValue =
+          value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
+        initialFormFieldsValues[fieldName] = serializedValue;
+
+        // If this is the first time we're setting a real value (was undefined), reset dirty state
+        if (formFieldsValues[fieldName] === undefined && value !== undefined) {
+          formFieldsValues[fieldName] = value;
+          formFieldsDirtyState[fieldName] = false;
+        }
+      }
+    }
+  };
 
   /**
    * Updates the validation state (validity and error message) for a given field.
@@ -240,15 +263,38 @@ export function useFormValidation(fields) {
   const validateFormPurely = (formToValidate) => {
     let isFormValid = true;
     if (fields && Array.isArray(fields)) {
-      for (const propertyName in formToValidate) {
-        if (formToValidate.hasOwnProperty(propertyName)) {
-          const fieldConfig = fields.find(
-            (f) => f.propertyName === propertyName
-          );
-          if (fieldConfig) {
-            validateField(fieldConfig, formToValidate[propertyName]);
-            if (formFieldsValidity[propertyName] === false) {
-              isFormValid = false;
+      for (const field of fields) {
+        if (
+          field.propertyName &&
+          formToValidate.hasOwnProperty(field.propertyName)
+        ) {
+          // Validate regular fields
+          validateField(field, formToValidate[field.propertyName]);
+          if (formFieldsValidity[field.propertyName] === false) {
+            isFormValid = false;
+          }
+        } else if (
+          field.subForm &&
+          formToValidate.hasOwnProperty(field.subForm)
+        ) {
+          // Validate sub-form fields
+          const subFormData = formToValidate[field.subForm];
+          if (
+            field.fields &&
+            Array.isArray(field.fields) &&
+            typeof subFormData === "object" &&
+            subFormData !== null
+          ) {
+            for (const subField of field.fields) {
+              if (
+                subField.propertyName &&
+                subFormData.hasOwnProperty(subField.propertyName)
+              ) {
+                validateField(subField, subFormData[subField.propertyName]);
+                if (formFieldsValidity[subField.propertyName] === false) {
+                  isFormValid = false;
+                }
+              }
             }
           }
         }
@@ -305,5 +351,6 @@ export function useFormValidation(fields) {
     validateFormPurely,
     setFieldTouched,
     checkFieldDirty,
+    updateFieldInitialValue,
   };
 }
