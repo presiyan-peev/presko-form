@@ -87,13 +87,13 @@ describe("useFormValidation", () => {
       formValidation.validateField(field, "");
       expect(formValidation.formFieldsValidity.name).toBe(false);
       expect(formValidation.formFieldsErrorMessages.name).toBe(
-        "Name is required"
+        "Field Name is required."
       );
 
       formValidation.validateField(field, "   ");
       expect(formValidation.formFieldsValidity.name).toBe(false);
       expect(formValidation.formFieldsErrorMessages.name).toBe(
-        "Name is required"
+        "Field Name is required."
       );
     });
 
@@ -111,7 +111,7 @@ describe("useFormValidation", () => {
       formValidation.validateField(field, "invalid-email");
       expect(formValidation.formFieldsValidity.email).toBe(false);
       expect(formValidation.formFieldsErrorMessages.email).toBe(
-        "Email is not valid"
+        "Field Email is not a valid email address."
       );
     });
 
@@ -147,7 +147,7 @@ describe("useFormValidation", () => {
       formValidation.validateField(field, "256.0.0.1");
       expect(formValidation.formFieldsValidity.ipv4Field).toBe(false);
       expect(formValidation.formFieldsErrorMessages.ipv4Field).toBe(
-        "IPv4 Field is not valid."
+        "Field IPv4 Field is not a valid IPv4 address."
       );
     });
     it("should be valid for correct ipv4 format", () => {
@@ -163,7 +163,7 @@ describe("useFormValidation", () => {
       formValidation.validateField(field, "invalid-ipv6");
       expect(formValidation.formFieldsValidity.ipv6Field).toBe(false);
       expect(formValidation.formFieldsErrorMessages.ipv6Field).toBe(
-        "IPv6 Field is not valid."
+        "Field IPv6 Field is not a valid IPv6 address."
       );
     });
     it("should be valid for correct ipv6 format", () => {
