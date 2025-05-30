@@ -14,6 +14,9 @@ A Vue.js library for effortlessly creating dynamic forms with powerful built-in 
 - **Customizable Validation:** Define custom validation logic and error messages.
 - **Nested Forms (Sub-Forms):** Structure complex forms by nesting configurations.
 - **Clear Event Handling:** Manage form submissions with `@submit` and validation failures with `@submit:reject`.
+- **Field Interaction States:** Track and react to `isTouched` and `isDirty` states for individual fields and the overall form.
+- **Customizable Props:** Configure prop names for error display and field states to integrate with existing component libraries.
+- **Scoped Slots:** Provides `isFormDirty` and `isFormTouched` states to default and submit row slots for enhanced UI customization.
 - **Vue 3 Composition API:** Modern, lightweight, and composable architecture.
 
 ## Installation
@@ -164,11 +167,11 @@ For `AppInput` to work with `v-model` from `PreskoFormItem` (which `PreskoForm` 
 ```javascript
 // Inside your AppInput.vue or similar custom input component
 defineProps(['modelValue', 'label', /* other props */]);
-defineEmits(['update:modelValue']);
+defineEmits(['update:modelValue', 'blur']); // Also emit 'blur'
 ```
 And in its template:
 ```html
-<input :value="modelValue" @input="$emit('update:modelValue', $event.target.value)" />
+<input :value="modelValue" @input="$emit('update:modelValue', $event.target.value)" @blur="$emit('blur')" />
 ```
 
 This is a simplified example. `PreskoForm` offers more customization for validation messages and error display.
@@ -183,7 +186,7 @@ The `fields` prop is an array of objects, where each object configures a field i
 *   **`component`** (String, required unless `subForm` is used)
     *   The name of the Vue component to be rendered for this form field. This component must be registered globally in your Vue application (e.g., in `main.js`) or imported and registered locally in the component where you're using `PreskoForm`.
     *   The specified component will be wrapped by `PreskoFormItem`, which provides `v-model` binding, validation state, and error message display.
-    *   Your custom input component should generally accept `modelValue` as a prop and emit `update:modelValue` for `v-model` to work correctly.
+    *   Your custom input component should generally accept `modelValue` as a prop and emit `update:modelValue` for `v-model` to work correctly. It should also emit a `blur` event if you want `isTouched` state to be automatically updated.
 
 *   **`rules`** (Array, optional)
     *   An array defining validation rules for the field. Rules can be:
@@ -241,7 +244,7 @@ The `fields` prop is an array of objects, where each object configures a field i
 
 *   **`label`** (String, optional, often placed in `props`)
     *   While not a direct top-level property consumed by `PreskoForm` itself for rendering (as `PreskoFormItem` passes most things via `field.props` to the actual input component), it's a common piece of data you might want for your fields.
-    *   It's typically passed within the `props` object to your input component, e.g., `props: { label: 'Username' }`. The `useFormValidation` composable can use `field.label` in default error messages if a specific label prop is not found within `field.props`.
+    *   It's typically passed within the `props` object to your input component, e.g., `props: { label: 'Username' }`. The `useFormValidation` composable can use `field.label` or `field.props.label` in default error messages.
 
 *   **`validators`** (Array of Functions, optional)
     *   For more complex or custom validation logic not covered by built-in rules or simple regex. Each function in the array receives the field's current value as an argument.
@@ -297,7 +300,7 @@ The following validation rules are available out-of-the-box:
 *   **`ipv6`**: Validates for a correct IPv6 address format.
 *   **`matchRegex`**: (Used internally when you provide a regex literal or an object with `name: 'matchRegex'`). Validates the input against the provided regular expression.
 
-These rules are sourced from `src/validation/index.js`. The default error messages are generally descriptive (e.g., "Field [field.label] is required"), but using the object format for custom messages is recommended for a better user experience.
+These rules are sourced from `src/validation/index.js`. The default error messages are generally descriptive (e.g., "Field [field label] is required."), but using the object format for custom messages is recommended for a better user experience.
 
 ### Custom Validation Functions (`validators` Array)
 
@@ -378,31 +381,7 @@ Your custom input components (e.g., `AppInput`) will have their own structure th
 
 ### 2. Slots
 
-`PreskoForm` offers slots for replacing or augmenting parts of its structure:
-
-*   **`title`**: Allows you to provide a custom title component or structure.
-    ```vue
-    <PreskoForm :fields="myFields" v-model="myData">
-      <template #title>
-        <h2>My Custom Form Title</h2>
-      </template>
-    </PreskoForm>
-    ```
-
-*   **`submit-row`**: Allows you to customize the entire row where the submit button is rendered. This is useful if you need additional buttons or elements next to the submit button.
-    ```vue
-    <PreskoForm :fields="myFields" v-model="myData" submit-component="MySubmit">
-      <template #submit-row>
-        <div class="custom-submit-area">
-          <MySubmit />
-          <button type="button" @click="handleCancel">Cancel</button>
-        </div>
-      </template>
-    </PreskoForm>
-    ```
-    If you use this slot, you are responsible for rendering the submit button itself (using your `submit-component` or a standard button).
-
-*   **Default Slot**: Any content placed directly inside `<PreskoForm></PreskoForm>` that isn't part of a named slot will be rendered at the end of the form, after the submit row.
+`PreskoForm` offers slots for replacing or augmenting parts of its structure. See the "Slots" subsection under "API Reference (`PreskoForm`)" for details on available slots and their scoped properties.
 
 ### 3. Submit Button Customization
 
@@ -432,7 +411,7 @@ Default `errorProps`:
 {
   hasErrors: "error", // Prop name on your component that receives a boolean
   errorMessages: "errorMessages", // Prop name for the error message(s)
-  errorMessagesType: "string" // Can be "string" or "array"
+  // errorMessagesType: "string" // This was an internal config, not directly for user.
 }
 ```
 
@@ -441,18 +420,19 @@ If your custom input component (e.g., `AppInput`) is set up to receive an `error
 **Example in your custom input component (`AppInput.vue`):**
 ```vue
 <template>
-  <div :class="{ 'has-error-style': error }">
+  <div :class="{ 'has-error-style': error }"> <!-- 'error' comes from errorProps.hasErrors -->
     <label>{{ label }}</label>
-    <input :value="modelValue" @input="$emit('update:modelValue', $event.target.value)" />
-    <div v-if="error && errorMessages" class="error-text-style">
+    <input :value="modelValue" @input="$emit('update:modelValue', $event.target.value)" @blur="$emit('blur')" />
+    <div v-if="error && errorMessages" class="error-text-style"> <!-- 'errorMessages' from errorProps.errorMessages -->
       {{ typeof errorMessages === 'string' ? errorMessages : errorMessages.join(', ') }}
     </div>
   </div>
 </template>
 
 <script setup>
-defineProps(['modelValue', 'label', 'error', 'errorMessages']);
-defineEmits(['update:modelValue']);
+// Props your custom input should expect based on default errorProps
+defineProps(['modelValue', 'label', 'error', 'errorMessages', 'touched', 'dirty']);
+defineEmits(['update:modelValue', 'blur']);
 </script>
 
 <style scoped>
@@ -473,12 +453,84 @@ You can change the prop names `PreskoForm` uses by providing a different `errorP
   ...
   :error-props="{
     hasErrors: 'isInvalid',
-    errorMessages: 'validationText',
-    errorMessagesType: 'string'
+    errorMessages: 'validationText'
   }"
 />
 ```
 This gives you flexibility in integrating `PreskoForm`'s validation feedback with your existing component designs.
+
+### 5. Field Interaction States (`isTouched`, `isDirty`)
+
+Custom input components can also receive `isTouched` and `isDirty` boolean states, allowing for styling based on user interaction. `PreskoForm` passes these states to each `PreskoFormItem`, which then passes them to your custom input component.
+
+You can configure the names of the props that your custom input component expects for these states using the `fieldStateProps` prop on `<PreskoForm>`.
+
+**Default `fieldStateProps`:**
+```javascript
+{
+  isTouched: 'touched', // Prop name for child component for 'isTouched' state
+  isDirty: 'dirty',   // Prop name for child component for 'isDirty' state
+}
+```
+
+**Example in your custom input component (`YourCustomInput.vue`):**
+(Note: The `<script setup>` in the previous `AppInput.vue` example already includes `touched` and `dirty` props.)
+```vue
+<template>
+  <div :class="{ 'is-touched': touched, 'is-dirty': dirty, 'has-error-style': error }">
+    <label v-if="label">{{ label }}</label>
+    <input
+      :value="modelValue"
+      @input="$emit('update:modelValue', $event.target.value)"
+      @blur="$emit('blur')"
+    />
+    <div v-if="error && errorMessages" class="error-text-style">
+      {{ typeof errorMessages === 'string' ? errorMessages : errorMessages.join(', ') }}
+    </div>
+  </div>
+</template>
+
+<script setup>
+defineProps({
+  modelValue: [String, Number, Array, Object, Boolean],
+  label: String,
+  error: Boolean,      // For validation errors, mapped by errorProps.hasErrors
+  errorMessages: [String, Array], // Mapped by errorProps.errorMessages
+  touched: Boolean,    // Received from PreskoFormItem, mapped by fieldStateProps.isTouched
+  dirty: Boolean,      // Received from PreskoFormItem, mapped by fieldStateProps.isDirty
+});
+defineEmits(['update:modelValue', 'blur']);
+</script>
+
+<style scoped>
+/* Example styling for touched and dirty states */
+.is-touched input {
+  /* border-color: orange; */ /* Example: Style when touched */
+}
+.is-dirty input {
+  /* background-color: #f0f8ff; */ /* Example: Style when dirty */
+}
+.has-error-style input {
+  border-color: red;
+  background-color: #ffe0e0;
+}
+.error-text-style {
+  color: red;
+  font-size: 0.875em;
+  margin-top: 4px;
+}
+</style>
+```
+If your component expects prop names like `fieldInteracted` and `valueChanged`, you would configure `PreskoForm` like this:
+```vue
+<PreskoForm
+  ...
+  :field-state-props="{
+    isTouched: 'fieldInteracted',
+    isDirty: 'valueChanged'
+  }"
+/>
+```
 
 ## API Reference (`PreskoForm`)
 
@@ -488,13 +540,14 @@ This section details the props, events, and slots for the main `<PreskoForm>` co
 
 | Prop                 | Type     | Default                                     | Required | Description                                                                                                                              |
 | -------------------- | -------- | ------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `modelValue`         | Object   | `{}`                                        | Yes      | The reactive object to bind form data to using `v-model`.                                                                                |
-| `fields`             | Array    | `[]`                                        | Yes      | The array of field configuration objects that defines the form structure. See "Form Configuration (`fields` Prop)" for details.          |
+| `modelValue`         | Object   | `() => ({})`                                | Yes      | The reactive object to bind form data to using `v-model`.                                                                                |
+| `fields`             | Array    | `() => []`                                  | Yes      | The array of field configuration objects that defines the form structure. See "Form Configuration (`fields` Prop)" for details.          |
 | `title`              | String   | `undefined`                                 | No       | An optional title displayed at the top of the form. Can be overridden by the `title` slot.                                               |
-| `submitComponent`    | String   | `undefined`                                 | Yes      | The name of the Vue component to be used for the submit button.                                                                          |
+| `submitComponent`    | String   | -                                           | Yes      | The name of the Vue component to be used for the submit button.                                                                          |
 | `submitBtnClasses`   | String   | `undefined`                                 | No       | CSS classes to apply to the `submitComponent`.                                                                                           |
 | `submitBtnProps`     | Object   | `undefined`                                 | No       | An object of props to pass to the `submitComponent`.                                                                                     |
-| `errorProps`         | Object   | `{ hasErrors: "error", errorMessages: "errorMessages", errorMessagesType: "string" }` | No       | Configures the prop names used to pass validation state (error status and messages) to each `PreskoFormItem` and thus to your custom input components. |
+| `errorProps`         | Object   | `{ hasErrors: "error", errorMessages: "errorMessages" }` | No       | Configures the prop names used to pass validation state (error status and messages) to each `PreskoFormItem` and thus to your custom input components. |
+| `fieldStateProps`    | Object   | `{ isTouched: 'touched', isDirty: 'dirty' }` | No       | Configures the prop names used to pass `isTouched` and `isDirty` boolean states to each rendered field component.                        |
 
 ### Events
 
@@ -503,14 +556,199 @@ This section details the props, events, and slots for the main `<PreskoForm>` co
 | `update:modelValue`  | `Object` (updated form data)                  | Emitted by `v-model` when form data changes.                                                               |
 | `submit`             | `Object` (valid form data, deep cloned)       | Emitted when the form is submitted and all fields pass validation. The payload is the complete form data.    |
 | `submit:reject`      | `undefined`                                   | Emitted when the form is submitted but fails validation.                                                   |
+| `field:touched`      | `{ propertyName: string, touched: boolean }`  | Emitted when a field's touched state changes. Typically becomes `true` after the field loses focus for the first time, or on a submit attempt. |
+| `field:dirty`        | `{ propertyName: string, dirty: boolean }`    | Emitted when a field's dirty state changes (i.e., its value is different from its initial value, or reverts to being the same). |
 
 ### Slots
 
-| Name          | Scoped | Description                                                                                                                                 |
-| ------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `title`       | No     | Allows providing a custom component or HTML structure for the form's title, replacing the default display via the `title` prop.             |
-| `submit-row`  | No     | Allows providing a custom layout for the entire row containing the submit button. Useful for adding other controls like a "Cancel" button. |
-| (default)     | No     | Any content passed directly into `<PreskoForm>` that is not in a named slot will be rendered at the very end of the form, after the submit row. |
+| Name          | Scoped | Description                                                                                                                                                                                                                            |
+| ------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| (default)     | Yes    | Wraps the main content of the form (title, fields wrapper, submit row, and default-extra slot). Exposes form-level states: `isFormDirty` (boolean) and `isFormTouched` (boolean). Can be used to display messages or controls based on overall form state. Example: `<PreskoForm v-slot="{ isFormDirty, isFormTouched }"> ... <div v-if="isFormDirty">Unsaved changes</div> ... </PreskoForm>` |
+| `title`       | No     | Allows providing a custom component or HTML structure for the form's title, replacing the default display via the `title` prop. This slot is rendered *inside* the default scoped slot.                                             |
+| `submit-row`  | Yes    | Allows providing a custom layout for the entire row containing the submit button. Exposes `isFormDirty` and `isFormTouched` states. Useful for adding other controls or conditionally styling the submit area. This slot is rendered *inside* the default scoped slot. |
+| `default-extra` | Yes  | An additional slot at the very end of the form, after the submit row. Also exposes `isFormDirty` and `isFormTouched` states. This slot is rendered *inside* the default scoped slot.                                                 |
+
+## Further Examples
+
+### Example: Conditional UI with Form & Field States
+
+This example shows how to use the `isFormDirty` and `isFormTouched` states from the default scoped slot,
+and how a custom input component can react to `touched` and `dirty` states passed to it.
+
+```vue
+<template>
+  <PreskoForm
+    v-model="formData"
+    :fields="formFields"
+    submit-component="MySubmitButton"
+    :field-state-props="{ isTouched: 'touched', isDirty: 'dirty' }"
+    v-slot="{ isFormDirty, isFormTouched }"
+    @submit="handleSubmit"
+    @field:touched="logEvent"
+    @field:dirty="logEvent"
+  >
+    <!-- PreskoForm will render fields here using PreskoFormItem -->
+    <!-- Each MyCustomInput will receive 'touched' and 'dirty' props -->
+
+    <p v-if="!isFormDirty && isFormTouched" class="info-message">
+      No changes made yet.
+    </p>
+    <p v-if="isFormDirty" class="warning-message">
+      You have unsaved changes!
+    </p>
+
+    <template #submit-row="{ isFormDirty: submitRowIsDirty }">
+      <MySubmitButton :disabled="!submitRowIsDirty" />
+      <!-- Example: Disable submit if form is not dirty -->
+    </template>
+  </PreskoForm>
+  <pre>Form Data: {{ formData }}</pre>
+</template>
+
+<script setup>
+import { ref } from 'vue';
+import PreskoForm from 'presko-form';
+// Assume MyCustomInput and MySubmitButton are registered globally or imported
+// For MyCustomInput to receive 'touched' and 'dirty', it must declare these props.
+// e.g., defineProps(['modelValue', 'label', 'error', 'errorMessages', 'touched', 'dirty']);
+
+const formData = ref({
+  username: 'JaneDoe', // Initial value, so initially not dirty
+  feedback: '',        // Initial value, so initially not dirty
+});
+
+const formFields = ref([
+  {
+    propertyName: 'username',
+    component: 'MyCustomInput',
+    rules: ['required'],
+    props: { label: 'Username' },
+    value: 'JaneDoe' // Explicit initial value for calculating dirtiness
+  },
+  {
+    propertyName: 'feedback',
+    component: 'MyCustomInput',
+    rules: [{ name: 'required', customErrorMsg: 'Feedback cannot be empty.' }],
+    props: { label: 'Your Feedback' },
+    value: '' // Explicit initial value
+  },
+]);
+
+const handleSubmit = (data) => {
+  alert('Form Submitted: ' + JSON.stringify(data));
+};
+
+const logEvent = (eventPayload) => {
+  console.log('PreskoForm event:', eventPayload);
+};
+</script>
+
+<style scoped>
+.info-message {
+  background-color: #e6f7ff;
+  border: 1px solid #91d5ff;
+  padding: 8px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+}
+.warning-message {
+  background-color: #fffbe6;
+  border: 1px solid #ffe58f;
+  padding: 8px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+}
+</style>
+
+<!-- Conceptual MyCustomInput.vue -->
+<!--
+<template>
+  <div :class="{ 'field-touched': touched, 'field-dirty': dirty, 'field-has-error': error }">
+    <label v-if="label">{{ label }}</label>
+    <input
+      :value="modelValue"
+      @input="$emit('update:modelValue', $event.target.value)"
+      @blur="$emit('blur')"
+    />
+    <p v-if="error && errorMessages" style="color:red; font-size:0.8em;">{{ errorMessages }}</p>
+  </div>
+</template>
+<script setup>
+// defineProps(['modelValue', 'label', 'touched', 'dirty', 'error', 'errorMessages']);
+// defineEmits(['update:modelValue', 'blur']);
+</script>
+<style scoped>
+// .field-touched input { border-left: 3px solid orange; }
+// .field-dirty input { background-color: #f0f8ff; } /* Light Alice Blue for dirty */
+// .field-has-error input { border-color: red; }
+</style>
+-->
+```
+
+### Example: Customizing Prop Names for State and Errors
+
+You can customize the names of the props that your input components receive for error states,
+touched status, and dirty status using the `errorProps` and `fieldStateProps` props on `PreskoForm`.
+
+```vue
+<template>
+  <PreskoForm
+    v-model="loginData"
+    :fields="loginFields"
+    submit-component="MySubmitButton"
+    :error-props="{ hasErrors: 'isInvalid', errorMessages: 'validationIssues' }"
+    :field-state-props="{ isTouched: 'interactedWith', isDirty: 'dataModified' }"
+    @submit="handleLogin"
+  />
+</template>
+
+<script setup>
+import { ref } from 'vue';
+import PreskoForm from 'presko-form';
+// Assume AdvancedCustomInput and MySubmitButton are registered or imported
+
+const loginData = ref({ email: '', password: '' });
+const loginFields = ref([
+  {
+    propertyName: 'email',
+    component: 'AdvancedCustomInput', // This component expects 'isInvalid', 'validationIssues', 'interactedWith', 'dataModified'
+    rules: ['required', 'email'],
+    props: { label: 'Email Address' },
+    value: '' // Initial value
+  },
+  {
+    propertyName: 'password',
+    component: 'AdvancedCustomInput',
+    rules: ['required'],
+    props: { label: 'Password', type: 'password' },
+    value: '' // Initial value
+  }
+]);
+const handleLogin = (data) => { console.log('Login attempt:', data); };
+</script>
+
+<!-- Conceptual AdvancedCustomInput.vue -->
+<!--
+<template>
+  <div :class="{ 'input-interacted': interactedWith, 'input-modified': dataModified }">
+    <label>{{ label }}</label>
+    <input
+      :type="type || 'text'"
+      :value="modelValue"
+      @input="$emit('update:modelValue', $event.target.value)"
+      @blur="$emit('blur')"
+    />
+    <p v-if="isInvalid && validationIssues" style="color:darkred; font-size:0.8em;">{{ validationIssues }}</p>
+  </div>
+</template>
+<script setup>
+// defineProps(['modelValue', 'label', 'type',
+//              'isInvalid', 'validationIssues',
+//              'interactedWith', 'dataModified']);
+// defineEmits(['update:modelValue', 'blur']);
+</script>
+-->
+```
 
 ## Advanced Usage (Placeholder)
 
