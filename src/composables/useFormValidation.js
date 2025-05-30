@@ -33,9 +33,9 @@ export function useFormValidation(fields) {
   };
 
   const validateWithCustomValidator = (field, input) => {
-    for (validationFn of field.validators) {
+    for (let validationFn of field.validators) {
       if (typeof validationFn == "function") {
-        const validity = field.validators(input);
+        const validity = validationFn(input);
         updateValidationState(field, validity);
       }
     }

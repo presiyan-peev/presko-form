@@ -18,13 +18,18 @@ export function isEmail(value, label, customErrorMsg) {
 }
 
 export function isDomain(value, label, customErrorMsg) {
-  return matchRegex(value, label, customErrorMsg, "regex");
+  const DOMAIN_REGEX =
+    /^(?!-)[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(\.[A-Za-z]{2,6})$/;
+  return matchRegex(value, label, customErrorMsg, DOMAIN_REGEX);
 }
 
 export function isIPv4Address(value, label, customErrorMsg) {
-  return matchRegex(value, label, customErrorMsg, "regex");
+  const IPV4_REGEX =
+    /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+  return matchRegex(value, label, customErrorMsg, IPV4_REGEX);
 }
 
 export function isIPv6Address(value, label, customErrorMsg) {
-  return matchRegex(value, label, customErrorMsg, "regex");
+  const IPV6_REGEX = /^([0-9a-fA-F]{1,4}:){7}([0-9a-fA-F]{1,4}|:)$/;
+  return matchRegex(value, label, customErrorMsg, IPV6_REGEX);
 }
