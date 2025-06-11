@@ -210,7 +210,7 @@ function addAttendee() {
       submit-component="AppSubmit"
       @submit="handleFormSubmit"
       @submit:reject="handleFormReject"
-      :error-props="{ errorMessagesType: 'string' }" <!-- To ensure single error string is passed -->
+      :error-props="{ errorMessagesType: 'string' }"
     >
       <template #title>
         <h2>Event Registration Form</h2>
