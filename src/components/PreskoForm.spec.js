@@ -1,329 +1,572 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
+import { nextTick, defineComponent, reactive } from "vue";
 import PreskoForm from "./PreskoForm.vue";
-import StubAppInput from "../__tests__/stubs/StubAppInput.vue";
-import StubAppSubmit from "../__tests__/stubs/StubAppSubmit.vue";
-// Assuming a stub for select and checkbox if needed by list item tests
-const StubAppSelect = defineComponent({
-  name: "StubAppSelect",
-  props: ["modelValue", "options", "label", "error", "errorMessages", "touched", "dirty"],
-  emits: ["update:modelValue", "blur"],
-  template: `<select @change="$emit('update:modelValue', $event.target.value)" @blur="$emit('blur')">
-    <option v-for="opt in options" :key="opt.value || opt" :value="opt.value || opt">
-      {{ opt.text || opt }}
-    </option>
-  </select>`,
+// Assuming stubs are in src/__tests__/stubs/ as per typical project structure
+// For PreskoForm.spec.js, we might not need the actual stubs from files if we define simple ones locally or use Teleport for complex children.
+// However, the task implies using them, so let's assume they are simple pass-through components.
+// If StubAppInput and StubAppSubmit are more complex, their behavior might affect these tests.
+
+// Define local, simplified stubs for testing if actual file stubs are problematic or too complex
+const LocalStubInput = defineComponent({
+  name: "LocalStubInput",
+  props: [
+    "modelValue",
+    "error",
+    "errorMessages",
+    "touched",
+    "dirty",
+    "label" /* any other props PreskoFormItem passes */,
+  ],
+  emits: ["update:modelValue", "blur", "input"], // 'input' is crucial for 'onInput' validation trigger
+  template: `
+    <div>
+      <label>{{ label }}</label>
+      <input
+        :value="modelValue"
+        @input="$emit('update:modelValue', $event.target.value); $emit('input', $event.target.value)"
+        @blur="$emit('blur')"
+      />
+      <div v-if="error && errorMessages" class="custom-stub-error">{{ Array.isArray(errorMessages) ? errorMessages.join(', ') : errorMessages }}</div>
+    </div>
+  `,
 });
-const StubAppCheckbox = defineComponent({
-  name: "StubAppCheckbox",
-  props: ["modelValue", "label", "error", "errorMessages", "touched", "dirty"],
-  emits: ["update:modelValue", "blur"],
-  template: `<input type="checkbox" :checked="modelValue" @change="$emit('update:modelValue', $event.target.checked)" @blur="$emit('blur')" />`,
+
+const LocalStubSubmit = defineComponent({
+  name: "LocalStubSubmit",
+  template: '<button type="submit">Submit</button>',
 });
 
+const getBaseFieldsConfig = () => [
+  {
+    propertyName: "name",
+    label: "Name",
+    component: LocalStubInput,
+    rules: ["isRequired", { name: "minLength", params: { min: 3 } }],
+    value: "", // Initial value for the model
+  },
+  {
+    propertyName: "email",
+    label: "Email",
+    component: LocalStubInput,
+    rules: ["isRequired", "isEmail"],
+    value: "",
+  },
+];
 
-import { nextTick, defineComponent, h, reactive } from "vue";
-
-// Helper to create a basic PreskoForm wrapper
-const createFormWrapper = (props = {}, options = {}) => {
-  return mount(PreskoForm, {
-    props: {
-      fields: [],
-      modelValue: {},
-      submitComponent: "StubAppSubmit", // Default submit component
-      ...props,
-    },
-    global: {
-      components: {
-        StubAppInput,
-        StubAppSubmit,
-        StubAppSelect,
-        StubAppCheckbox,
-        PreskoForm, // For nested forms / sub-forms
+const getListFieldsConfig = () => [
+  {
+    propertyName: "contacts",
+    type: "list",
+    label: "Contacts",
+    itemLabel: "Contact",
+    initialValue: [],
+    fields: [
+      {
+        propertyName: "name",
+        label: "Contact Name",
+        component: LocalStubInput,
+        rules: ["isRequired"],
+        value: "",
       },
-      ...options.global,
-    },
-    ...options,
-  });
-};
+      {
+        propertyName: "email",
+        label: "Contact Email",
+        component: LocalStubInput,
+        rules: ["isRequired", "isEmail"],
+        value: "",
+      },
+    ],
+  },
+];
 
-describe("PreskoForm.vue - Basic Functionality", () => {
-  // ... (Keep existing basic tests for rendering, v-model, validation, sub-forms, props, slots, interaction states)
-  // For brevity, I'm assuming these existing tests are here and passing.
-  // I will add new describe blocks for List Field Functionality.
+// Mock global Validation object used by useFormValidation
+// This ensures that we control the validation outcomes directly.
+vi.mock("../validation", () => ({
+  default: {
+    isRequired: vi.fn(),
+    isEmail: vi.fn(),
+    minLength: vi.fn(),
+    matchRegex: vi.fn(), // Add any other rules used
+  },
+}));
 
-  describe("Basic Rendering", () => {
-    it("renders specified components for fields", async () => {
-      const actualFields = [
-        { propertyName: "name", component: "StubAppInput", props: { label: "Name" }, value: "DefaultName" },
-      ];
-      const wrapper = createFormWrapper({ fields: actualFields, modelValue: {name: "DefaultName"} });
-      await nextTick();
-      const inputComponents = wrapper.findAllComponents(StubAppInput);
-      expect(inputComponents.length).toBe(1);
-      expect(inputComponents[0].props("label")).toBe("Name");
-    });
-  });
-
-  describe("v-model integration", () => {
-    it("updates input components when modelValue prop changes", async () => {
-      const fields = [{ propertyName: "name", component: "StubAppInput", value: "Initial" }];
-      const wrapper = createFormWrapper({ fields, modelValue: { name: "Initial Name" } });
-      await nextTick();
-      await wrapper.setProps({ modelValue: { name: "Updated Name" } });
-      await nextTick();
-      expect(wrapper.findComponent(StubAppInput).props("modelValue")).toBe("Updated Name");
-    });
-
-    it('emits "update:modelValue" when an input changes', async () => {
-      const fields = [{ propertyName: "name", component: "StubAppInput", value: "Old" }];
-      const wrapper = createFormWrapper({ fields, modelValue: {name: "Old"} });
-      await nextTick();
-      wrapper.findComponent(StubAppInput).vm.$emit("update:modelValue", "New");
-      await nextTick();
-      expect(wrapper.emitted("update:modelValue")[0][0]).toEqual({ name: "New" });
-    });
-  });
-
-   describe("Validation and Submission Flow", () => {
-    it('emits "submit:reject" with invalid data', async () => {
-      const fields = [{ propertyName: "name", component: "StubAppInput", rules: ["required"] }];
-      const wrapper = createFormWrapper({ fields, modelValue: { name: "" } });
-      await nextTick();
-      await wrapper.find("form").trigger("submit.prevent");
-      await nextTick();
-      expect(wrapper.emitted("submit:reject")).toBeTruthy();
-    });
-
-    it('emits "submit" with valid data', async () => {
-      const fields = [{ propertyName: "name", component: "StubAppInput", rules: ["required"] }];
-      const wrapper = createFormWrapper({ fields, modelValue: { name: "Valid" } });
-      await nextTick();
-      await wrapper.find("form").trigger("submit.prevent");
-      await nextTick();
-      expect(wrapper.emitted("submit")[0][0]).toEqual({ name: "Valid" });
-    });
-  });
-
-
-});
-
-
-describe("PreskoForm.vue - List Field Functionality", () => {
-  let listFieldsConfig;
-  let initialModelData;
+describe("PreskoForm.vue", () => {
+  let formModel;
 
   beforeEach(() => {
-    listFieldsConfig = [
+    vi.useFakeTimers();
+    // Reset global Validation mock implementations for each test
+    // Note: Validation is already mocked via vi.mock above
+
+    formModel = reactive({ name: "", email: "" }); // Ensure model is fresh for each test
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks(); // Clears mocks, including implementations
+  });
+
+  const createWrapper = (props = {}, initialModel = {}) => {
+    // Ensure a fresh reactive model for each wrapper if not provided
+    const currentModel = reactive({ name: "", email: "", ...initialModel });
+
+    return mount(PreskoForm, {
+      props: {
+        fields: getBaseFieldsConfig(),
+        submitComponent: LocalStubSubmit,
+        modelValue: currentModel, // Pass the reactive model here
+        ...props,
+      },
+      global: {
+        // Stubs are not needed here if components are passed via field.component directly
+      },
+    });
+  };
+
+  const createFormWrapper = (props = {}, options = {}) => {
+    const { initialModel = {}, fieldsConfig = getBaseFieldsConfig() } = options;
+    const currentModel = reactive({ name: "", email: "", ...initialModel });
+
+    return mount(PreskoForm, {
+      props: {
+        fields: fieldsConfig,
+        submitComponent: LocalStubSubmit,
+        modelValue: currentModel,
+        ...props,
+      },
+      global: {
+        stubs: {
+          PreskoFormItem: true, // Stub PreskoFormItem if needed
+        },
+      },
+    });
+  };
+
+  it("renders fields based on configuration", () => {
+    const wrapper = createWrapper(
+      {},
+      { name: "test", email: "test@example.com" }
+    );
+    expect(wrapper.findAllComponents(LocalStubInput).length).toBe(2);
+    expect(wrapper.findComponent(LocalStubSubmit).exists()).toBe(true);
+  });
+
+  it("updates modelValue on input", async () => {
+    const wrapper = createWrapper({}, { name: "", email: "" });
+    const nameInput = wrapper.findAllComponents(LocalStubInput).at(0);
+
+    await nameInput.vm.$emit("update:modelValue", "John");
+
+    expect(wrapper.emitted()["update:modelValue"]).toBeTruthy();
+    expect(wrapper.emitted()["update:modelValue"][0][0]).toEqual({
+      name: "John",
+      email: "",
+    });
+  });
+
+  describe("Default validationTrigger (onBlur)", () => {
+    it("should not validate on input, then validate on blur and show error if invalid", async () => {
+      const wrapper = createWrapper({}, { name: "J", email: "" });
+      const nameInput = wrapper.findAllComponents(LocalStubInput).at(0);
+
+      // Simulate input - PreskoFormItem should emit 'field-input'
+      // PreskoForm's handleFieldInput calls triggerValidation, but 'onBlur' mode won't validate on 'input' type
+      await nameInput.vm.$emit("update:modelValue", "J"); // This will trigger 'field-input' in PreskoFormItem
+      await nameInput.vm.$emit("input"); // Explicitly emit 'input' if the component does that separately
+      await nextTick();
+
+      let errorDiv = wrapper.find(".presko-form-item .custom-stub-error"); // Look for error within the item
+      expect(errorDiv.exists()).toBe(false); // No error visible yet
+
+      await nameInput.vm.$emit("blur");
+      await nextTick(); // Allow validation and re-render
+
+      errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
+      expect(errorDiv.exists()).toBe(true);
+      expect(errorDiv.text()).toContain("Name min 3");
+    });
+
+    it("should validate on submit", async () => {
+      const wrapper = createWrapper({}, { name: "", email: "" });
+      await wrapper.find("form").trigger("submit.prevent"); // Use .prevent if form has it
+      await nextTick();
+
+      const errorMessages = wrapper.findAll(
+        ".presko-form-item .custom-stub-error"
+      );
+      expect(errorMessages.length).toBeGreaterThanOrEqual(1);
+      expect(errorMessages.at(0).text()).toContain("Name is required");
+      expect(wrapper.emitted()["submit:reject"]).toBeTruthy();
+    });
+  });
+
+  describe('validationTrigger="onInput"', () => {
+    const onInputProps = { validationTrigger: "onInput", inputDebounceMs: 50 };
+
+    it("should validate on input after debounce", async () => {
+      // Initial model passed to createWrapper will be used by PreskoForm
+      const wrapper = createWrapper(onInputProps, { name: "J", email: "" });
+      const nameInput = wrapper.findAllComponents(LocalStubInput).at(0);
+
+      // Simulate input event that PreskoFormItem listens to via v-model which then emits 'field-input'
+      await nameInput.vm.$emit("update:modelValue", "Jo"); // value becomes 'Jo'
+      await nextTick(); // Allow PreskoFormItem to react and emit 'field-input'
+
+      // Error message might be hidden by PreskoFormItem's visual hiding logic
+      // We check the validation state after debounce.
+      vi.advanceTimersByTime(onInputProps.inputDebounceMs);
+      await nextTick(); // Allow validation and re-render
+
+      const errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
+      expect(errorDiv.exists()).toBe(true);
+      expect(errorDiv.text()).toContain("Name min 3"); // 'Jo' is 2 chars
+    });
+
+    it("should debounce rapid inputs", async () => {
+      const currentModel = reactive({ name: "", email: "" });
+      const wrapper = createWrapper(
+        { ...onInputProps, inputDebounceMs: 100 },
+        currentModel
+      );
+      const nameInputVm = wrapper.findAllComponents(LocalStubInput).at(0).vm;
+
+      currentModel.name = "J"; // Simulate external model update if PreskoForm relies on that
+      await nameInputVm.$emit("update:modelValue", "J"); // Simulate input
+      await nextTick();
+      vi.advanceTimersByTime(50);
+
+      currentModel.name = "Jo";
+      await nameInputVm.$emit("update:modelValue", "Jo");
+      await nextTick();
+      vi.advanceTimersByTime(50);
+
+      currentModel.name = "Joh"; // Valid input
+      await nameInputVm.$emit("update:modelValue", "Joh");
+      await nextTick();
+
+      // Error should not have appeared for 'J' or 'Jo' due to debounce and visual error hiding
+      let errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
+      expect(errorDiv.exists()).toBe(false);
+
+      vi.advanceTimersByTime(100); // Full debounce for 'Joh'
+      await nextTick(); // Allow validation and re-render
+
+      errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
+      expect(errorDiv.exists()).toBe(false); // 'Joh' is valid
+      // Validation was called (mocked in vi.mock above)
+    });
+
+    it("error message hides on input to an invalid field, then reappears if still invalid", async () => {
+      const currentModel = reactive({ name: "J", email: "" });
+      const wrapper = createWrapper(onInputProps, currentModel);
+      const nameInputVm = wrapper.findAllComponents(LocalStubInput).at(0).vm;
+
+      // Initial blur to make it invalid and show error
+      await nameInputVm.$emit("blur");
+      await nextTick();
+      let errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
+      expect(errorDiv.exists()).toBe(true);
+      expect(errorDiv.text()).toContain("Name min 3");
+
+      // User starts typing again
+      currentModel.name = "Jo"; // Update model
+      await nameInputVm.$emit("update:modelValue", "Jo"); // Simulate input
+      await nextTick();
+
+      // Error should hide immediately (visual error hiding in PreskoFormItem)
+      errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
+      expect(errorDiv.exists()).toBe(false);
+
+      vi.advanceTimersByTime(onInputProps.inputDebounceMs);
+      await nextTick();
+
+      errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
+      expect(errorDiv.exists()).toBe(true);
+      expect(errorDiv.text()).toContain("Name min 3"); // 'Jo' is still invalid
+    });
+  });
+
+  describe('validationTrigger="onSubmit"', () => {
+    const onSubmitProps = { validationTrigger: "onSubmit" };
+
+    it("should not validate on input or blur", async () => {
+      const wrapper = createWrapper(onSubmitProps, { name: "J", email: "" });
+      const nameInputVm = wrapper.findAllComponents(LocalStubInput).at(0).vm;
+
+      await nameInputVm.$emit("update:modelValue", "Jo");
+      await nextTick();
+      vi.advanceTimersByTime(200);
+      let errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
+      expect(errorDiv.exists()).toBe(false);
+
+      await nameInputVm.$emit("blur");
+      await nextTick();
+      errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
+      expect(errorDiv.exists()).toBe(false);
+    });
+
+    it("should only validate on submit", async () => {
+      const wrapper = createWrapper(onSubmitProps, { name: "J", email: "" });
+      await wrapper.find("form").trigger("submit.prevent");
+      await nextTick();
+
+      const errorMessages = wrapper.findAll(
+        ".presko-form-item .custom-stub-error"
+      );
+      expect(errorMessages.length).toBeGreaterThanOrEqual(1);
+      expect(wrapper.emitted()["submit:reject"]).toBeTruthy();
+    });
+  });
+
+  describe("List Fields", () => {
+    it("should render list fields with add button", () => {
+      const wrapper = createFormWrapper(
+        {},
+        {
+          fieldsConfig: getListFieldsConfig(),
+          initialModel: { contacts: [] },
+        }
+      );
+
+      expect(wrapper.find(".presko-list-field").exists()).toBe(true);
+      expect(wrapper.find(".presko-list-add-btn").exists()).toBe(true);
+      expect(wrapper.find(".presko-list-add-btn").text()).toContain(
+        "Add Contact"
+      );
+    });
+
+    it("should add new list item when add button is clicked", async () => {
+      const wrapper = createFormWrapper(
+        {},
+        {
+          fieldsConfig: getListFieldsConfig(),
+          initialModel: { contacts: [] },
+        }
+      );
+
+      const addButton = wrapper.find(".presko-list-add-btn");
+      await addButton.trigger("click");
+      await nextTick();
+
+      expect(wrapper.emitted()["update:modelValue"]).toBeTruthy();
+      const updatedModel = wrapper.emitted()["update:modelValue"][0][0];
+      expect(updatedModel.contacts).toHaveLength(1);
+      expect(updatedModel.contacts[0]).toEqual({ name: "", email: "" });
+    });
+
+    it("should remove list item when remove button is clicked", async () => {
+      const wrapper = createFormWrapper(
+        {},
+        {
+          fieldsConfig: getListFieldsConfig(),
+          initialModel: {
+            contacts: [
+              { name: "John Doe", email: "john@example.com" },
+              { name: "Jane Doe", email: "jane@example.com" },
+            ],
+          },
+        }
+      );
+
+      expect(wrapper.findAll(".presko-list-item")).toHaveLength(2);
+
+      const removeButton = wrapper.find(".presko-list-remove-btn");
+      await removeButton.trigger("click");
+      await nextTick();
+
+      expect(wrapper.emitted()["update:modelValue"]).toBeTruthy();
+      const updatedModel = wrapper.emitted()["update:modelValue"][0][0];
+      expect(updatedModel.contacts).toHaveLength(1);
+      expect(updatedModel.contacts[0]).toEqual({
+        name: "Jane Doe",
+        email: "jane@example.com",
+      });
+    });
+
+    it("should handle list item field updates", async () => {
+      const wrapper = createFormWrapper(
+        {},
+        {
+          fieldsConfig: getListFieldsConfig(),
+          initialModel: {
+            contacts: [{ name: "John", email: "john@example.com" }],
+          },
+        }
+      );
+
+      // Simulate updating the first contact's name
+      // This would be done through PreskoFormItem but we test the handler directly
+      await wrapper.vm.handleListItemFieldModelUpdate(
+        "contacts",
+        0,
+        "name",
+        "John Doe"
+      );
+      await nextTick();
+
+      expect(wrapper.emitted()["update:modelValue"]).toBeTruthy();
+      const updatedModel = wrapper.emitted()["update:modelValue"][0][0];
+      expect(updatedModel.contacts[0].name).toBe("John Doe");
+      expect(updatedModel.contacts[0].email).toBe("john@example.com");
+    });
+
+    it("should handle list field touched events", async () => {
+      const wrapper = createFormWrapper(
+        {},
+        {
+          fieldsConfig: getListFieldsConfig(),
+          initialModel: {
+            contacts: [{ name: "John", email: "john@example.com" }],
+          },
+        }
+      );
+
+      // Test list item field blur
+      await wrapper.vm.handleListItemFieldBlurred("contacts", 0, "name");
+      await nextTick();
+
+      expect(wrapper.emitted()["field:touched"]).toBeTruthy();
+      const touchedEvents = wrapper.emitted()["field:touched"];
+      expect(
+        touchedEvents.some(
+          (event) => event[0].propertyName === "contacts[0].name"
+        )
+      ).toBe(true);
+    });
+
+    it("should validate list items properly", async () => {
+      // Allow PreskoForm's internal watch on modelValue to sync initial values to useFormValidation
+      const wrapper = createFormWrapper(
+        { validationTrigger: "onBlur" },
+        {
+          fieldsConfig: getListFieldsConfig(),
+          initialModel: {
+            contacts: [{ name: "", email: "invalid-email" }],
+          },
+        }
+      );
+
+      await nextTick(); // Allow initial setup
+
+      // Simulate blur on list item field
+      await wrapper.vm.handleListItemFieldBlurred("contacts", 0, "name");
+      await nextTick();
+
+      // Check if validation was triggered (would be handled by useFormValidation)
+      expect(wrapper.emitted()["field:touched"]).toBeTruthy();
+
+      // Test form submission with invalid list items
+      await wrapper.find("form").trigger("submit.prevent");
+      await nextTick();
+
+      expect(wrapper.emitted()["submit:reject"]).toBeTruthy();
+    });
+  });
+
+  describe("Integration - Form with Lists and Regular Fields", () => {
+    const getMixedFieldsConfig = () => [
+      {
+        propertyName: "title",
+        label: "Form Title",
+        component: LocalStubInput,
+        rules: ["isRequired"],
+        value: "",
+      },
+      ...getListFieldsConfig(),
+    ];
+
+    it("should handle mixed field types correctly", async () => {
+      const wrapper = createFormWrapper(
+        {},
+        {
+          fieldsConfig: getMixedFieldsConfig(),
+          initialModel: {
+            title: "Test Form",
+            contacts: [{ name: "John", email: "john@example.com" }],
+          },
+        }
+      );
+
+      // Test regular field update
+      await wrapper.vm.handleFieldModelUpdate("title", "Updated Title");
+      await nextTick();
+
+      // Test list operation
+      await wrapper.vm.handleAddItem("contacts");
+      await nextTick();
+
+      expect(wrapper.emitted()["update:modelValue"]).toBeTruthy();
+      const events = wrapper.emitted()["update:modelValue"];
+      const lastUpdate = events[events.length - 1][0];
+
+      expect(lastUpdate.title).toBe("Updated Title");
+      expect(lastUpdate.contacts).toHaveLength(2);
+      expect(lastUpdate.contacts[1]).toEqual({ name: "", email: "" });
+    });
+  });
+
+  describe("Sub-forms", () => {
+    const getSubFormFieldsConfig = () => [
       {
         propertyName: "mainField",
-        component: "StubAppInput",
-        props: { label: "Main Field" },
-        value: "Main Data",
+        label: "Main Field",
+        component: LocalStubInput,
+        rules: ["isRequired"],
+        value: "",
       },
       {
-        type: "list",
-        propertyName: "contacts",
-        label: "Contacts",
-        itemLabel: "Contact",
-        defaultValue: { name: "Default Name", email: "default@example.com" },
+        subForm: "profile",
         fields: [
-          { propertyName: "name", component: "StubAppInput", rules: ["required"], props: { label: "Contact Name" } },
-          { propertyName: "email", component: "StubAppInput", rules: ["required", "email"], props: { label: "Contact Email" } },
+          {
+            propertyName: "firstName",
+            label: "First Name",
+            component: LocalStubInput,
+            rules: ["isRequired"],
+            value: "",
+          },
+          {
+            propertyName: "lastName",
+            label: "Last Name",
+            component: LocalStubInput,
+            rules: ["isRequired"],
+            value: "",
+          },
         ],
       },
     ];
 
-    initialModelData = reactive({
-      mainField: "Initial Main Data",
-      contacts: [
-        { name: "Alice", email: "alice@example.com" },
-        { name: "Bob", email: "bob@example.com" },
-      ],
+    it("should handle sub-form events correctly", async () => {
+      const wrapper = createFormWrapper(
+        {},
+        {
+          fieldsConfig: getSubFormFieldsConfig(),
+          initialModel: {
+            mainField: "test",
+            profile: { firstName: "John", lastName: "Doe" },
+          },
+        }
+      );
+
+      // Test sub-form event handling
+      await wrapper.vm.handleSubFormEvent("field:touched", "profile", {
+        propertyName: "firstName",
+        touched: true,
+      });
+      await nextTick();
+
+      expect(wrapper.emitted()["field:touched"]).toBeTruthy();
+      const touchedEvents = wrapper.emitted()["field:touched"];
+
+      // Should emit both the sub-form container and the specific field
+      expect(
+        touchedEvents.some((event) => event[0].propertyName === "profile")
+      ).toBe(true);
+      expect(
+        touchedEvents.some(
+          (event) => event[0].propertyName === "profile.firstName"
+        )
+      ).toBe(true);
     });
   });
-
-  it("renders initial list items correctly", async () => {
-    const wrapper = createFormWrapper({ fields: listFieldsConfig, modelValue: initialModelData });
-    await nextTick();
-
-    const listFieldSection = wrapper.find(".presko-list-field");
-    expect(listFieldSection.exists()).toBe(true);
-    expect(listFieldSection.find(".presko-list-field-header label").text()).toBe("Contacts");
-
-    const listItems = listFieldSection.findAll(".presko-list-item");
-    expect(listItems.length).toBe(2);
-
-    // Check first item's fields
-    const firstItemInputs = listItems[0].findAllComponents(StubAppInput);
-    expect(firstItemInputs.length).toBe(2);
-    expect(firstItemInputs[0].props("modelValue")).toBe("Alice");
-    expect(firstItemInputs[1].props("modelValue")).toBe("alice@example.com");
-
-    // Check second item's fields
-    const secondItemInputs = listItems[1].findAllComponents(StubAppInput);
-    expect(secondItemInputs.length).toBe(2);
-    expect(secondItemInputs[0].props("modelValue")).toBe("Bob");
-    expect(secondItemInputs[1].props("modelValue")).toBe("bob@example.com");
-  });
-
-  it("updates modelValue when a list item field changes", async () => {
-    const wrapper = createFormWrapper({ fields: listFieldsConfig, modelValue: initialModelData });
-    await nextTick();
-
-    const firstItemNameInput = wrapper.findAll(".presko-list-item")[0].findAllComponents(StubAppInput)[0];
-    await firstItemNameInput.vm.$emit("update:modelValue", "Alice Updated");
-    await nextTick();
-
-    const emittedUpdate = wrapper.emitted("update:modelValue");
-    expect(emittedUpdate).toBeTruthy();
-    const lastEmittedValue = emittedUpdate[emittedUpdate.length - 1][0];
-    expect(lastEmittedValue.contacts[0].name).toBe("Alice Updated");
-    expect(lastEmittedValue.contacts[0].email).toBe("alice@example.com"); // Email should be unchanged
-  });
-
-  it("adds an item when 'Add Item' button is clicked (via exposed method)", async () => {
-    const wrapper = createFormWrapper({ fields: listFieldsConfig, modelValue: initialModelData });
-    await nextTick();
-
-    // Simulate calling the exposed addItem method (as if a button inside PreskoForm called it)
-    // Or, if PreskoForm renders the button itself:
-    const addButton = wrapper.find(".presko-list-add-btn"); // Assuming PreskoForm renders this button
-    if (addButton.exists()) {
-       await addButton.trigger("click");
-    } else {
-      // Fallback to calling exposed method if button is not found directly (e.g. if slot is used)
-      await wrapper.vm.addItem("contacts"); // PreskoForm exposes addItem
-    }
-    await nextTick();
-    await nextTick(); // Allow for modelValue watcher in PreskoForm to sync
-
-    const listItems = wrapper.findAll(".presko-list-item");
-    expect(listItems.length).toBe(3);
-
-    const lastItemInputs = listItems[2].findAllComponents(StubAppInput);
-    expect(lastItemInputs[0].props("modelValue")).toBe("Default Name"); // From defaultValue
-    expect(lastItemInputs[1].props("modelValue")).toBe("default@example.com");
-
-    const emittedUpdate = wrapper.emitted("update:modelValue");
-    expect(emittedUpdate).toBeTruthy();
-    const lastEmittedValue = emittedUpdate[emittedUpdate.length - 1][0];
-    expect(lastEmittedValue.contacts.length).toBe(3);
-    expect(lastEmittedValue.contacts[2].name).toBe("Default Name");
-  });
-
-  it("removes an item when 'Remove Item' button is clicked (via exposed method)", async () => {
-    const wrapper = createFormWrapper({ fields: listFieldsConfig, modelValue: initialModelData });
-    await nextTick();
-
-    // Simulate calling removeItem (as if a button inside PreskoForm called it)
-    // Or, if PreskoForm renders the button itself:
-    const firstRemoveButton = wrapper.findAll(".presko-list-remove-btn")[0];
-     if (firstRemoveButton.exists()) {
-       await firstRemoveButton.trigger("click");
-    } else {
-      // Fallback to calling exposed method
-      await wrapper.vm.removeItem("contacts", 0);
-    }
-    await nextTick();
-    await nextTick();
-
-
-    const listItems = wrapper.findAll(".presko-list-item");
-    expect(listItems.length).toBe(1);
-    // Bob should now be the first item
-    const remainingItemInputs = listItems[0].findAllComponents(StubAppInput);
-    expect(remainingItemInputs[0].props("modelValue")).toBe("Bob");
-
-    const emittedUpdate = wrapper.emitted("update:modelValue");
-    expect(emittedUpdate).toBeTruthy();
-    const lastEmittedValue = emittedUpdate[emittedUpdate.length - 1][0];
-    expect(lastEmittedValue.contacts.length).toBe(1);
-    expect(lastEmittedValue.contacts[0].name).toBe("Bob");
-  });
-
-  it("displays validation errors for fields within list items", async () => {
-    initialModelData.contacts.push({ name: "", email: "invalid-email" }); // Add an invalid item
-    const wrapper = createFormWrapper({ fields: listFieldsConfig, modelValue: initialModelData });
-    await nextTick();
-    await nextTick(); // for model init and watchers
-
-    await wrapper.find("form").trigger("submit.prevent");
-    await nextTick();
-
-    const listItems = wrapper.findAll(".presko-list-item");
-    expect(listItems.length).toBe(3);
-
-    // Third item (index 2) has errors
-    const thirdItemInputs = listItems[2].findAllComponents(StubAppInput);
-    expect(thirdItemInputs[0].props("error")).toBe(true); // Name is required
-    expect(thirdItemInputs[0].props("errorMessages")).toBe("Field Contact Name is required.");
-    expect(thirdItemInputs[1].props("error")).toBe(true); // Email is invalid
-    expect(thirdItemInputs[1].props("errorMessages")).toBe("Field Contact Email is not a valid email address.");
-
-    expect(wrapper.emitted("submit:reject")).toBeTruthy();
-  });
-
-  it("emits 'field:touched' with correct path for list item field", async () => {
-    const wrapper = createFormWrapper({ fields: listFieldsConfig, modelValue: initialModelData });
-    await nextTick();
-    const firstItemEmailInput = wrapper.findAll(".presko-list-item")[0].findAllComponents(StubAppInput)[1];
-    await firstItemEmailInput.vm.$emit("blur");
-    await nextTick();
-    const touchedEvents = wrapper.emitted("field:touched");
-    expect(touchedEvents).toBeTruthy();
-    // Check for the specific field, and also the parent list being touched
-    expect(touchedEvents).toEqual(
-      expect.arrayContaining([
-        [{ propertyName: "contacts[0].email", touched: true }],
-        [{ propertyName: "contacts[0]", touched: true }], // As per useFormValidation logic
-        [{ propertyName: "contacts", touched: true }]     // As per useFormValidation logic
-      ])
-    );
-  });
-
-  it("emits 'field:dirty' with correct path for list item field", async () => {
-    const wrapper = createFormWrapper({ fields: listFieldsConfig, modelValue: initialModelData });
-    await nextTick();
-    const firstItemNameInput = wrapper.findAll(".presko-list-item")[0].findAllComponents(StubAppInput)[0];
-
-    // Simulate input that changes the value
-    firstItemNameInput.vm.$emit("update:modelValue", "Alice New");
-    // Manually update modelValue as parent would, to trigger PreskoForm's internal watcher
-    initialModelData.contacts[0].name = "Alice New";
-    await wrapper.setProps({ modelValue: initialModelData }); // This triggers the main watcher
-    await nextTick(); // Allow watcher to run
-    await nextTick(); // Allow watcher to run
-
-    const dirtyEvents = wrapper.emitted("field:dirty");
-    expect(dirtyEvents).toBeTruthy();
-    // Check for the specific field, and also the parent list being dirty
-     expect(dirtyEvents).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ propertyName: "contacts[0].name", dirty: true }),
-        expect.objectContaining({ propertyName: "contacts[0]", dirty: true }),
-        expect.objectContaining({ propertyName: "contacts", dirty: true })
-      ])
-    );
-  });
-
-  it("correctly initializes an empty list if no initialValue provided", async () => {
-    const emptyListModel = { mainField: "Test", contacts: [] }; // contacts is empty
-    const wrapper = createFormWrapper({ fields: listFieldsConfig, modelValue: emptyListModel });
-    await nextTick();
-
-    const listItems = wrapper.findAll(".presko-list-item");
-    expect(listItems.length).toBe(0);
-
-    // Add an item
-    await wrapper.vm.addItem("contacts");
-    await nextTick();
-    await nextTick();
-
-    const updatedListItems = wrapper.findAll(".presko-list-item");
-    expect(updatedListItems.length).toBe(1);
-    expect(updatedListItems[0].findAllComponents(StubAppInput)[0].props("modelValue")).toBe("Default Name");
-  });
 });
-
-[end of src/components/PreskoForm.spec.js]

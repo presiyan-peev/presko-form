@@ -31,14 +31,18 @@
               :submit-component="props.submitComponent"
               :submit-btn-classes="props.submitBtnClasses"
               :submit-btn-props="props.submitBtnProps"
+              :validation-trigger="props.validationTrigger"
+              :input-debounce-ms="props.inputDebounceMs"
               @update:modelValue="
                 (value) => handleSubFormModelUpdate(field.subForm, value)
               "
               @field:touched="
-                (eventData) => handleSubFormEvent('field:touched', field.subForm, eventData)
+                (eventData) =>
+                  handleSubFormEvent('field:touched', field.subForm, eventData)
               "
               @field:dirty="
-                (eventData) => handleSubFormEvent('field:dirty', field.subForm, eventData)
+                (eventData) =>
+                  handleSubFormEvent('field:dirty', field.subForm, eventData)
               "
               @submit:reject="handleSubFormSubmitReject"
             ></PreskoForm>
@@ -133,8 +137,10 @@
                 errMsg: formFieldsErrorMessages[field.propertyName],
               }"
               @field-blurred="
-                (emittedPropertyName) => handleFieldBlurred(emittedPropertyName, field.propertyName)
+                (emittedPropertyName) =>
+                  handleFieldBlurred(emittedPropertyName, field.propertyName)
               "
+              @field-input="handleFieldInput"
             ></PreskoFormItem>
           </div>
         </div>
@@ -176,11 +182,57 @@ import { useFormValidation } from "../composables/useFormValidation";
 import { watch, computed, ref } from "vue";
 
 const props = defineProps({
+  /**
+   * The reactive object to bind form data to using `v-model`.
+   * This is typically defined in the parent component.
+   * @type {Object}
+   * @default () => ({})
+   * @required
+   */
+  // modelValue: is defined by defineModel
+
+  /**
+   * Array of field configuration objects that defines the form structure.
+   * Each object configures a field or a sub-form.
+   * @type {Array<Object>}
+   * @default () => []
+   * @required
+   */
   fields: { type: Array, default: () => [] },
+
+  /**
+   * An optional title displayed at the top of the form.
+   * Can be overridden by the `title` slot.
+   * @type {string}
+   */
   title: String,
+
+  /**
+   * The name of the Vue component to be used for the submit button.
+   * This component will receive a `type="submit"` attribute implicitly.
+   * @type {string}
+   * @required
+   */
   submitComponent: String,
+
+  /**
+   * CSS classes to apply directly to the `submitComponent`.
+   * @type {string}
+   */
   submitBtnClasses: String,
+
+  /**
+   * An object of props to pass to the `submitComponent`.
+   * @type {Object}
+   */
   submitBtnProps: Object,
+
+  /**
+   * Configures the prop names used to pass validation state (error status and messages)
+   * to each `PreskoFormItem` and subsequently to your custom input components.
+   * @type {Object}
+   * @default { hasErrors: "error", errorMessages: "errorMessages", errorMessagesType: "string" }
+   */
   errorProps: {
     type: Object,
     default: () => ({
@@ -189,6 +241,13 @@ const props = defineProps({
       errorMessagesType: "string",
     }),
   },
+
+  /**
+   * Configures the prop names used to pass `isTouched` and `isDirty` boolean states
+   * to each rendered field component via `PreskoFormItem`.
+   * @type {Object}
+   * @default { isTouched: 'touched', isDirty: 'dirty' }
+   */
   fieldStateProps: {
     type: Object,
     default: () => ({
@@ -196,23 +255,139 @@ const props = defineProps({
       isDirty: "dirty",
     }),
   },
+
+  /**
+   * Determines when validation should be triggered for a field.
+   * - 'onSubmit': Validation occurs only when the form is submitted.
+   * - 'onBlur': Validation occurs when a field loses focus (blur event) and on submit.
+   * - 'onInput': Validation occurs as the user types (debounced) in a field, on blur, and on submit.
+   * @type {'onSubmit' | 'onBlur' | 'onInput'}
+   * @default 'onBlur'
+   */
+  validationTrigger: {
+    type: String,
+    default: "onBlur",
+    validator: (value) => ["onSubmit", "onBlur", "onInput"].includes(value),
+  },
+
+  /**
+   * Debounce time in milliseconds for 'onInput' validation.
+   * This is only applicable when `validationTrigger` is set to 'onInput'.
+   * @type {number}
+   * @default 100
+   */
+  inputDebounceMs: {
+    type: Number,
+    default: 100,
+  },
 });
 
 const emit = defineEmits([
+  /**
+   * Emitted by `v-model` on `PreskoForm` when form data changes.
+   * @param {Object} modelValue - The updated form data object.
+   */
   "update:modelValue",
+  /**
+   * Emitted when the form is submitted and all fields pass validation.
+   * @param {Object} submittedData - The complete and valid form data (deep cloned).
+   */
   "submit",
+  /**
+   * Emitted when the form is submitted but fails validation.
+   */
   "submit:reject",
+  /**
+   * Emitted when a field's touched state changes.
+   * @param {{ propertyName: string, touched: boolean }} payload - Object containing the field's propertyName and its new touched state.
+   */
   "field:touched",
+  /**
+   * Emitted when a field's dirty state changes.
+   * @param {{ propertyName: string, dirty: boolean }} payload - Object containing the field's propertyName and its new dirty state.
+   */
   "field:dirty",
 ]);
 
+/**
+ * Two-way bound model for the form data.
+ * Uses `local: true` to create a local copy that syncs with the parent.
+ * @type {import('vue').ModelRef<Object>}
+ */
 const modelValue = defineModel("modelValue", {
   default: () => ({}),
   local: true,
 });
 
+// Template refs for sub-forms
 const subFormRefs = ref([]);
 
+/**
+ * Initializes the model with fields' default values if they are not already present.
+ * This function is called reactively when the `fields` prop changes.
+ */
+const initializeModel = (fieldsToInit) => {
+  if (typeof modelValue.value !== "object" || modelValue.value === null) {
+    modelValue.value = {}; // Ensure modelValue is an object
+  }
+
+  let tempModel = { ...modelValue.value };
+  let modelWasModified = false;
+
+  if (fieldsToInit && Array.isArray(fieldsToInit)) {
+    fieldsToInit.forEach((field) => {
+      const key = field.propertyName || field.subForm;
+      if (!key) return;
+
+      let keyNeedsInitialization = !Object.prototype.hasOwnProperty.call(
+        tempModel,
+        key
+      );
+
+      if (field.type === "list") {
+        if (keyNeedsInitialization || !Array.isArray(tempModel[key])) {
+          tempModel[key] =
+            field.initialValue && Array.isArray(field.initialValue)
+              ? [...field.initialValue]
+              : [];
+          modelWasModified = true;
+        }
+      } else if (field.subForm) {
+        if (
+          keyNeedsInitialization ||
+          typeof tempModel[key] !== "object" ||
+          tempModel[key] === null
+        ) {
+          tempModel[key] = {};
+          modelWasModified = true;
+        }
+        // Recursively initialize sub-form fields if they are defined
+        if (Array.isArray(field.fields)) {
+          // This part is tricky if sub-model was modified. For simplicity,
+          // we assume sub-form initialization happens primarily if key itself was missing.
+          // Deeper merge or more complex init might be needed for all edge cases.
+          // The useFormValidation's init is more comprehensive for its own state.
+        }
+      } else if (field.propertyName) {
+        if (keyNeedsInitialization) {
+          tempModel[key] = field.hasOwnProperty("value")
+            ? field.value
+            : undefined;
+          modelWasModified = true;
+        }
+      }
+    });
+  }
+
+  if (modelWasModified) {
+    modelValue.value = tempModel;
+  }
+};
+
+// Initialize model immediately with current fields
+initializeModel(props.fields);
+
+// Initialize form validation composable
 const {
   formFieldsValues, // Internal reactive state for values in useFormValidation
   formFieldsValidity,
@@ -223,266 +398,347 @@ const {
   setFieldTouched,
   checkFieldDirty,
   updateFieldInitialValue,
-  addItem,
-  removeItem,
-} = useFormValidation(props.fields);
+  triggerValidation,
+} = useFormValidation(props.fields, {
+  validationTrigger: props.validationTrigger,
+  inputDebounceMs: props.inputDebounceMs,
+});
 
-/**
- * Initializes the modelValue with fields' default values or existing structure.
- */
-const initializeModel = (fieldsToProcess) => {
-  if (typeof modelValue.value !== "object" || modelValue.value === null) {
-    modelValue.value = {};
-  }
-  let wasModelModified = false;
-  const workingModel = JSON.parse(JSON.stringify(modelValue.value));
+// Watch for changes in the modelValue to update initial values for dirty checking
+// and to check dirty state on subsequent changes.
+watch(
+  () => modelValue.value,
+  (newModelValue, oldModelValue) => {
+    if (newModelValue && typeof newModelValue === "object") {
+      props.fields.forEach((field) => {
+        if (
+          field.propertyName &&
+          newModelValue.hasOwnProperty(field.propertyName)
+        ) {
+          const oldValueForDirtyCheck =
+            oldModelValue && typeof oldModelValue === "object"
+              ? oldModelValue[field.propertyName]
+              : undefined;
 
-  const processFieldsRecursive = (currentFields, modelSegment) => {
-    if (currentFields && Array.isArray(currentFields)) {
-      currentFields.forEach((field) => {
-        const key = field.propertyName || field.subForm;
-        if (!key) return;
-
-        if (field.type === "list") {
-          if (!modelSegment.hasOwnProperty(key) || !Array.isArray(modelSegment[key])) {
-            modelSegment[key] = field.initialValue && Array.isArray(field.initialValue)
-              ? JSON.parse(JSON.stringify(field.initialValue))
-              : [];
-            wasModelModified = true;
+          // Update initial value in useFormValidation if this is the first time we get a real value
+          if (
+            updateFieldInitialValue &&
+            oldValueForDirtyCheck === undefined &&
+            newModelValue[field.propertyName] !== undefined
+          ) {
+            updateFieldInitialValue(
+              field.propertyName,
+              newModelValue[field.propertyName]
+            );
           }
-          const listFieldDefinition = field.fields;
-          const listDefaultItemValue = field.defaultValue || {};
-          modelSegment[key].forEach((item, index) => {
-            let currentItem = modelSegment[key][index];
-            if (typeof currentItem !== 'object' || currentItem === null) {
-                currentItem = modelSegment[key][index] = JSON.parse(JSON.stringify(listDefaultItemValue));
-                wasModelModified = true;
-            }
-            if (Array.isArray(listFieldDefinition)) {
-              listFieldDefinition.forEach(listItemFieldDef => {
-                if (listItemFieldDef.propertyName && !currentItem.hasOwnProperty(listItemFieldDef.propertyName)) {
-                  currentItem[listItemFieldDef.propertyName] = listItemFieldDef.hasOwnProperty('value')
-                    ? listItemFieldDef.value
-                    : listDefaultItemValue.hasOwnProperty(listItemFieldDef.propertyName)
-                      ? listDefaultItemValue[listItemFieldDef.propertyName]
-                      : undefined;
-                  wasModelModified = true;
-                }
-              });
-            }
-          });
-        } else if (field.subForm) {
-          if (!modelSegment.hasOwnProperty(key) || typeof modelSegment[key] !== "object" || modelSegment[key] === null) {
-            modelSegment[key] = {};
-            wasModelModified = true;
-          }
-          processFieldsRecursive(field.fields, modelSegment[key]);
-        } else if (field.propertyName) {
-          if (!modelSegment.hasOwnProperty(key)) {
-            modelSegment[key] = field.hasOwnProperty("value") ? field.value : undefined;
-            wasModelModified = true;
-          }
-        }
-      });
-    }
-  };
 
-  processFieldsRecursive(fieldsToProcess, workingModel);
-  if (wasModelModified) {
-    modelValue.value = workingModel;
-  }
-};
-
-watch(() => props.fields, (newFields) => {
-    initializeModel(newFields);
-}, { deep: true, immediate: true });
-
-
-watch(() => modelValue.value, (newModel, oldModel) => {
-    const syncWithInternalStates = (currentFieldsConfig, currentNewModel, currentOldModel, pathPrefix = "") => {
-      if (!currentFieldsConfig || typeof currentNewModel !== 'object' || currentNewModel === null) return;
-      currentFieldsConfig.forEach(field => {
-        const key = field.propertyName || field.subForm;
-        if (!key) return;
-        const fullPath = pathPrefix + key;
-        const newValue = currentNewModel[key];
-        // const oldValue = currentOldModel ? currentOldModel[key] : undefined; // Not always needed for this sync
-
-        if (field.type === 'list') {
-          if (formFieldsValues[fullPath] !== newValue && Array.isArray(newValue)) {
-             formFieldsValues[fullPath] = newValue; // Sync internal array
-          }
-          updateFieldInitialValue(fullPath, JSON.parse(JSON.stringify(newValue || [])));
-          if(checkFieldDirty(fullPath, newValue)) {
-            emit("field:dirty", { propertyName: fullPath, dirty: formFieldsDirtyState[fullPath] });
-          }
-          if (Array.isArray(newValue) && Array.isArray(field.fields)) {
-            newValue.forEach((item, index) => {
-              const oldItem = Array.isArray(currentOldModel?.[key]) && currentOldModel[key][index] ? currentOldModel[key][index] : undefined;
-              syncWithInternalStates(field.fields, item, oldItem, `${fullPath}[${index}].`);
+          // Check and emit dirty state
+          if (
+            checkFieldDirty &&
+            checkFieldDirty(
+              field.propertyName,
+              newModelValue[field.propertyName]
+            )
+          ) {
+            emit("field:dirty", {
+              propertyName: field.propertyName,
+              dirty: formFieldsDirtyState[field.propertyName],
             });
           }
-        } else if (field.subForm) {
-          if (newValue && typeof newValue === 'object') {
-             if (formFieldsValues[fullPath] !== newValue) {
-                formFieldsValues[fullPath] = newValue;
-             }
-            updateFieldInitialValue(fullPath, JSON.parse(JSON.stringify(newValue || {})));
-            if(checkFieldDirty(fullPath, newValue)) {
-              emit("field:dirty", { propertyName: fullPath, dirty: formFieldsDirtyState[fullPath] });
-            }
-            syncWithInternalStates(field.fields, newValue, currentOldModel ? currentOldModel[key] : undefined, `${fullPath}.`);
-          }
-        } else if (field.propertyName) {
-           if (formFieldsValues[fullPath] !== newValue) {
-             formFieldsValues[fullPath] = newValue;
-           }
-          updateFieldInitialValue(fullPath, newValue);
-          if (checkFieldDirty(fullPath, newValue)) {
-            emit("field:dirty", { propertyName: fullPath, dirty: formFieldsDirtyState[fullPath] });
-          }
         }
+        // Similar logic for sub-forms could be added here if needed,
+        // though sub-forms manage their own dirty state internally.
       });
-    };
-    syncWithInternalStates(props.fields, newModel, oldModel, "");
-  }, { deep: true, immediate: true }
+    }
+  },
+  { deep: true, immediate: true }
 );
 
-const handleFieldBlurred = (emittedPropertyName, fullPath) => {
-  if (setFieldTouched(fullPath, true)) {
-    emit("field:touched", { propertyName: fullPath, touched: formFieldsTouchedState[fullPath] });
+// Watch for changes in the `fields` prop to re-initialize the model if fields are dynamically changed.
+watch(
+  () => props.fields,
+  (newFields) => {
+    initializeModel(newFields);
+    // Note: useFormValidation might need to be re-initialized or made reactive to `fields`
+    // if the entire field structure changes significantly post-setup.
+    // The current setup primarily initializes based on the initial `fields` prop.
+  },
+  { deep: true } // `immediate: false` is default for watch, which is fine here.
+);
+
+/**
+ * Handles the `field-blurred` event from a `PreskoFormItem`.
+ * Sets the field as touched and triggers validation for the 'blur' event type.
+ * Emits a `field:touched` event if the field's touched state changed.
+ * @param {string} propertyName - The `propertyName` of the field that was blurred.
+ */
+const handleFieldBlurred = (propertyName) => {
+  const touchedChanged = setFieldTouched(propertyName, true);
+  if (touchedChanged) {
+    emit("field:touched", {
+      propertyName,
+      touched: formFieldsTouchedState[propertyName], // Emit the reactive state
+    });
+  }
+  if (typeof triggerValidation === "function") {
+    triggerValidation(propertyName, "blur", modelValue.value);
   }
 };
 
-const handleListItemFieldBlurred = (listName, itemIndex, itemFieldName) => {
-  const fullPath = `${listName}[${itemIndex}].${itemFieldName}`;
-  if (setFieldTouched(fullPath, true)) {
-    emit("field:touched", { propertyName: fullPath, touched: formFieldsTouchedState[fullPath] });
+/**
+ * Handles the `field-input` event from a `PreskoFormItem`.
+ * Triggers validation for the 'input' event type for the specified field.
+ * @param {string} propertyName - The `propertyName` of the field that received input.
+ */
+const handleFieldInput = (propertyName) => {
+  if (typeof triggerValidation === "function") {
+    triggerValidation(propertyName, "input", modelValue.value);
   }
 };
 
+/**
+ * Handles events bubbled up from nested `PreskoForm` instances (sub-forms).
+ * It relays `field:touched` and `field:dirty` events with prefixed property names.
+ * It also marks the sub-form container itself as touched when a nested field is touched.
+ * @param {'field:touched' | 'field:dirty'} eventName - The name of the event.
+ * @param {string} subFormKey - The `propertyName` of the sub-form in the main form's model.
+ * @param {object} eventData - The payload from the sub-form's event.
+ * @param {string} eventData.propertyName - The `propertyName` of the field within the sub-form.
+ * @param {boolean} eventData.touched - The new touched state (for 'field:touched').
+ * @param {boolean} eventData.dirty - The new dirty state (for 'field:dirty').
+ */
 const handleSubFormEvent = (eventName, subFormKey, eventData) => {
-  const fullPath = `${subFormKey}.${eventData.propertyName}`;
+  const fullPropertyName = `${subFormKey}.${eventData.propertyName}`;
   if (eventName === "field:touched") {
     if (setFieldTouched(subFormKey, true)) {
-       emit("field:touched", { propertyName: subFormKey, touched: formFieldsTouchedState[subFormKey] });
+      // Mark the sub-form container as touched
+      emit("field:touched", { propertyName: subFormKey, touched: true });
     }
-    if (setFieldTouched(fullPath, eventData.touched)) {
-      emit("field:touched", { propertyName: fullPath, touched: formFieldsTouchedState[fullPath] });
-    }
+    emit("field:touched", {
+      // Relay the granular event
+      propertyName: fullPropertyName,
+      touched: eventData.touched,
+    });
   } else if (eventName === "field:dirty") {
-    const subFormModel = modelValue.value[subFormKey];
-    if (subFormModel && checkFieldDirty(fullPath, subFormModel[eventData.propertyName])) {
-      emit("field:dirty", { propertyName: fullPath, dirty: formFieldsDirtyState[fullPath] });
-    }
-    if (checkFieldDirty(subFormKey, modelValue.value[subFormKey])) {
-        emit("field:dirty", { propertyName: subFormKey, dirty: formFieldsDirtyState[subFormKey] });
-    }
+    // For sub-form dirty state, PreskoForm primarily relies on changes to its modelValue.
+    // However, emitting granular dirty events can be useful for consumers.
+    // The sub-form container's dirty state is managed by `checkFieldDirty` on `modelValue.value` changes.
+    emit("field:dirty", {
+      propertyName: fullPropertyName,
+      dirty: eventData.dirty,
+    });
   }
 };
 
-const isFormDirty = computed(() => Object.values(formFieldsDirtyState).some(state => state === true));
-const isFormTouched = computed(() => Object.values(formFieldsTouchedState).some(state => state === true));
+/**
+ * Computed property indicating if any field in the form (including sub-form containers) is dirty.
+ * @type {import('vue').ComputedRef<boolean>}
+ */
+const isFormDirty = computed(() => {
+  return Object.values(formFieldsDirtyState).some((state) => state === true);
+});
 
+/**
+ * Computed property indicating if any field in the form (including sub-form containers) has been touched.
+ * @type {import('vue').ComputedRef<boolean>}
+ */
+const isFormTouched = computed(() => {
+  return Object.values(formFieldsTouchedState).some((state) => state === true);
+});
+
+/**
+ * Handles the form submission process.
+ * Marks all direct fields and sub-form containers of this form instance as touched.
+ * Calls `handleFormSubmit` on any sub-forms to trigger their own validation and field touching.
+ * Then, validates the current form's entire model using `validateFormPurely`.
+ * Emits 'submit' with the deep cloned form data if valid, or 'submit:reject' if invalid.
+ */
 const handleFormSubmit = () => {
-  const touchAllFieldsRecursive = (fieldsToTouch, pathPrefix = "") => {
-      if (!fieldsToTouch || !Array.isArray(fieldsToTouch)) return;
-      fieldsToTouch.forEach((field) => {
-        const key = field.propertyName || field.subForm;
-        if (!key) return;
-        const fullPath = pathPrefix + key;
-        if (setFieldTouched(fullPath, true)) {
-          emit("field:touched", { propertyName: fullPath, touched: formFieldsTouchedState[fullPath] });
-        }
-        if (field.type === "list" && Array.isArray(field.fields)) {
-          const listItems = modelValue.value[key] || [];
-          listItems.forEach((item, index) => {
-            touchAllFieldsRecursive(field.fields, `${fullPath}[${index}].`);
+  // Mark all fields (including sub-form containers) of this form instance as touched.
+  if (props.fields && Array.isArray(props.fields)) {
+    props.fields.forEach((field) => {
+      const key = field.propertyName || field.subForm;
+      if (key) {
+        // Ensure key exists
+        if (setFieldTouched(key, true)) {
+          emit("field:touched", {
+            propertyName: key,
+            touched: formFieldsTouchedState[key], // Emit current reactive state
           });
-        } else if (field.subForm && Array.isArray(field.fields)) {
-          touchAllFieldsRecursive(field.fields, `${fullPath}.`);
         }
-      });
-    };
-  touchAllFieldsRecursive(props.fields);
-
-  if (subFormRefs.value && subFormRefs.value.length > 0) {
-    subFormRefs.value.forEach((subForm) => {
-      if (subForm && typeof subForm.handleFormSubmit === "function") {
-        subForm.handleFormSubmit(); // Should ideally not emit if parent is already submitting
       }
     });
   }
+
+  // Trigger submit on sub-forms. They will manage their own fields' touched state and validation.
+  if (subFormRefs.value && subFormRefs.value.length > 0) {
+    subFormRefs.value.forEach((subForm) => {
+      if (subForm && typeof subForm.handleFormSubmit === "function") {
+        subForm.handleFormSubmit();
+      }
+    });
+  }
+
+  // Validate the entire current form's model.
   const isValid = validateFormPurely(modelValue.value);
-  if (!isValid) {
-    emit("submit:reject");
-  } else {
+
+  if (isValid) {
     emit("submit", JSON.parse(JSON.stringify(modelValue.value)));
+  } else {
+    emit("submit:reject");
   }
 };
 
-const handleSubFormModelUpdate = (subFormKey, newSubModelValue) => {
+/**
+ * Handles updates to the model value of a sub-form.
+ * @param {string} subFormKey - The `propertyName` of the sub-form in the main form's model.
+ * @param {Object} newSubFormModelValue - The new model value for the sub-form.
+ */
+const handleSubFormModelUpdate = (subFormKey, newSubFormModelValue) => {
   if (typeof modelValue.value === "object" && modelValue.value !== null) {
-    const updatedModel = { ...modelValue.value, [subFormKey]: newSubModelValue };
-    modelValue.value = updatedModel;
-    // Main watcher handles sync with useFormValidation and emits
+    const updatedModel = {
+      ...modelValue.value,
+      [subFormKey]: newSubFormModelValue,
+    };
+    modelValue.value = updatedModel; // Update local model
+    // Emit update for v-model binding on PreskoForm itself
+    // This was previously missing, could be important for parent component if it directly watches modelValue changes.
+    emit("update:modelValue", updatedModel);
   }
 };
 
+/**
+ * Handles the `submit:reject` event bubbled up from a sub-form.
+ * Relays the `submit:reject` event to the parent of this `PreskoForm` instance.
+ * @param {Object} [eventData] - Optional payload from the sub-form's `submit:reject` event.
+ */
 const handleSubFormSubmitReject = (eventData) => {
-  emit("submit:reject", eventData);
+  emit("submit:reject", eventData); // Relay the event
 };
 
+/**
+ * Handles updates to the model value of a direct field within this form.
+ * @param {string} propertyName - The `propertyName` of the field to be updated.
+ * @param {any} value - The new value for the field.
+ */
 const handleFieldModelUpdate = (propertyName, value) => {
   if (typeof modelValue.value === "object" && modelValue.value !== null) {
-    const newMainModel = { ...modelValue.value, [propertyName]: value };
-    modelValue.value = newMainModel;
-    // Main watcher handles sync and dirty checks
+    const updatedModel = {
+      ...modelValue.value,
+      [propertyName]: value,
+    };
+    modelValue.value = updatedModel; // Update local model
+    // Emit update for v-model binding on PreskoForm itself
+    emit("update:modelValue", updatedModel);
   }
 };
 
-const handleListItemFieldModelUpdate = (listName, itemIndex, itemFieldName, value) => {
-   if (
-    typeof modelValue.value === "object" && modelValue.value !== null &&
-    modelValue.value[listName] && Array.isArray(modelValue.value[listName]) &&
+/**
+ * Handles adding a new item to a list field.
+ * @param {string} listPropertyName - The propertyName of the list field.
+ */
+const handleAddItem = (listPropertyName) => {
+  const listFieldConfig = props.fields.find(
+    (f) => f.propertyName === listPropertyName && f.type === "list"
+  );
+  if (!listFieldConfig) return;
+
+  let newItemInitialData = {};
+  if (
+    listFieldConfig.defaultValue &&
+    typeof listFieldConfig.defaultValue === "object"
+  ) {
+    newItemInitialData = JSON.parse(
+      JSON.stringify(listFieldConfig.defaultValue)
+    );
+  } else if (Array.isArray(listFieldConfig.fields)) {
+    listFieldConfig.fields.forEach((subField) => {
+      if (subField.propertyName) {
+        newItemInitialData[subField.propertyName] = subField.hasOwnProperty(
+          "value"
+        )
+          ? subField.value
+          : undefined;
+      }
+    });
+  }
+
+  const currentList = modelValue.value[listPropertyName] || [];
+  const newList = [...currentList, newItemInitialData];
+  const updatedModel = { ...modelValue.value, [listPropertyName]: newList };
+  modelValue.value = updatedModel;
+  emit("update:modelValue", updatedModel);
+};
+
+/**
+ * Handles removing an item from a list field.
+ * @param {string} listPropertyName - The propertyName of the list field.
+ * @param {number} index - The index of the item to remove.
+ */
+const handleRemoveItem = (listPropertyName, index) => {
+  const currentList = modelValue.value[listPropertyName] || [];
+  if (index < 0 || index >= currentList.length) return;
+
+  const newList = currentList.filter((_, i) => i !== index);
+  const updatedModel = { ...modelValue.value, [listPropertyName]: newList };
+  modelValue.value = updatedModel;
+  emit("update:modelValue", updatedModel);
+};
+
+/**
+ * Handles updates to the model value of a field within a list item.
+ * @param {string} listName - The propertyName of the list field.
+ * @param {number} itemIndex - The index of the item in the list.
+ * @param {string} itemFieldName - The propertyName of the field within the list item.
+ * @param {any} value - The new value for the field.
+ */
+const handleListItemFieldModelUpdate = (
+  listName,
+  itemIndex,
+  itemFieldName,
+  value
+) => {
+  if (
+    typeof modelValue.value === "object" &&
+    modelValue.value !== null &&
+    modelValue.value[listName] &&
+    Array.isArray(modelValue.value[listName]) &&
     modelValue.value[listName][itemIndex] !== undefined
   ) {
     const newList = [...modelValue.value[listName]];
     const newItem = { ...newList[itemIndex], [itemFieldName]: value };
     newList[itemIndex] = newItem;
     const newMainModel = { ...modelValue.value, [listName]: newList };
-    modelValue.value = newMainModel; // Triggers main modelValue watcher
+    modelValue.value = newMainModel;
+    emit("update:modelValue", newMainModel);
   }
 };
 
-const handleAddItem = (listPropertyName) => {
-  const listFieldConfig = props.fields.find(f => f.propertyName === listPropertyName && f.type === 'list');
-  if (!listFieldConfig) return;
-  let newItemInitialData = {};
-  if (listFieldConfig.defaultValue && typeof listFieldConfig.defaultValue === 'object') {
-    newItemInitialData = JSON.parse(JSON.stringify(listFieldConfig.defaultValue));
-  } else if (Array.isArray(listFieldConfig.fields)) {
-    listFieldConfig.fields.forEach(subField => {
-      if (subField.propertyName) {
-        newItemInitialData[subField.propertyName] = subField.hasOwnProperty('value') ? subField.value : undefined;
-      }
+/**
+ * Handles the blur event for a field within a list item.
+ * @param {string} listName - The propertyName of the list field.
+ * @param {number} itemIndex - The index of the item in the list.
+ * @param {string} itemFieldName - The propertyName of the field within the list item.
+ */
+const handleListItemFieldBlurred = (listName, itemIndex, itemFieldName) => {
+  const fullPath = `${listName}[${itemIndex}].${itemFieldName}`;
+  const touchedChanged = setFieldTouched(fullPath, true);
+  if (touchedChanged) {
+    emit("field:touched", {
+      propertyName: fullPath,
+      touched: formFieldsTouchedState[fullPath],
     });
   }
-  addItem(listPropertyName, newItemInitialData);
-  const newListArray = formFieldsValues[listPropertyName] ? [...formFieldsValues[listPropertyName]] : [];
-  modelValue.value = { ...modelValue.value, [listPropertyName]: newListArray };
+  if (typeof triggerValidation === "function") {
+    triggerValidation(fullPath, "blur", modelValue.value);
+  }
 };
 
-const handleRemoveItem = (listPropertyName, index) => {
-  removeItem(listPropertyName, index);
-  const newListArray = formFieldsValues[listPropertyName] ? [...formFieldsValues[listPropertyName]] : [];
-  modelValue.value = { ...modelValue.value, [listPropertyName]: newListArray };
-};
-
+// Expose methods for parent components, e.g., for programmatic submission.
 defineExpose({
   handleFormSubmit,
-  addItem: handleAddItem,
-  removeItem: handleRemoveItem,
+  handleAddItem,
+  handleRemoveItem,
 });
 </script>
 
@@ -528,13 +784,14 @@ defineExpose({
   background-color: #f0f0f0;
 }
 .presko-form-title {
-    font-size: 1.5em;
-    margin-bottom: 1em;
+  font-size: 1.5em;
+  margin-bottom: 1em;
 }
 .presko-form-fields-wrapper > div {
-    margin-bottom: 1em; /* Add space between form items/groups */
+  margin-bottom: 1em; /* Add space between form items/groups */
 }
-.read-the-docs { /* From original scaffold, can be removed if not used */
+.read-the-docs {
+  /* From original scaffold, can be removed if not used */
   color: #888;
 }
 </style>
