@@ -11,6 +11,9 @@ import Validation from "../validation";
  * @property {Array<Function>} [validators] - An array of custom validator functions.
  * @property {Array<FieldConfig>} [fields] - If this field represents a sub-form, this contains its field configurations. Used for recursive processing.
  * @property {string} [subForm] - If this field configuration object represents a sub-form container, this is its key in the parent model.
+ * @property {string} [type] - Type of field, e.g., 'list' for list fields.
+ * @property {Array} [initialValue] - Initial value for list fields.
+ * @property {Object} [defaultValue] - Default value template for new list items.
  */
 
 /**
@@ -26,10 +29,10 @@ import Validation from "../validation";
 /**
  * Composable for managing form validation, field values, and interaction states (touched, dirty).
  * It is designed to work with a form structure defined by an array of `FieldConfig` objects,
- * supporting both flat field layouts and nested sub-forms.
+ * supporting both flat field layouts, nested sub-forms, and list fields.
  *
  * @param {Array<FieldConfig>} fields - An array of field configuration objects that define the form structure.
- *   Each object describes a field or a sub-form container.
+ *   Each object describes a field, a sub-form container, or a list field.
  * @param {UseFormValidationOptions} [options] - Options to configure validation behavior, such as trigger type and debounce time.
  * @returns {Object} An object containing reactive states for form data and validation, along with methods to manage the form.
  * @property {Object<string, any>} formFieldsValues - Reactive object intended to hold the current values of form fields.
@@ -53,22 +56,18 @@ import Validation from "../validation";
  * @property {Function} triggerValidation - Triggers validation for a specific field based on an event type (e.g., 'input', 'blur'),
  *   respecting configured validation triggers and debounce settings.
  * @property {Function} resetValidationState - Resets the validation state (validity and error messages) for a specific field or all fields if no field name is provided.
+ * @property {Function} addItem - Adds an item to a list field.
+ * @property {Function} removeItem - Removes an item from a list field.
  */
 export function useFormValidation(fields, options = {}) {
-  const {
-    validationTrigger = "onBlur",
-    inputDebounceMs = 100,
-  } = options;
+  const { validationTrigger = "onBlur", inputDebounceMs = 100 } = options;
 
   /** @type {Object<string, any>} */
   let formFieldsValues = reactive({});
-  /** @type {Object<string, boolean|undefined>} */
   let formFieldsValidity = reactive({});
   /** @type {Object<string, string|string[]|undefined>} */
   let formFieldsErrorMessages = reactive({});
-  /** @type {Object<string, boolean>} */
   let formFieldsTouchedState = reactive({});
-  /** @type {Object<string, boolean>} */
   let formFieldsDirtyState = reactive({});
   /** @type {Object<string, any>} */
   let initialFormFieldsValues = {}; // Stores initial values for dirty checking
@@ -84,8 +83,42 @@ export function useFormValidation(fields, options = {}) {
    */
   const getFieldLabel = (field) => {
     return (
-      field.label || (field.props && field.props.label) || field.propertyName || ""
+      field.label ||
+      (field.props && field.props.label) ||
+      field.propertyName ||
+      ""
     );
+  };
+
+  /**
+   * Initializes a single field's state.
+   * @private
+   * @param {FieldConfig} fieldConfig - The field configuration object.
+   * @param {string} pathPrefix - The path prefix for nested fields.
+   * @param {Object} targetValuesObject - The target object to set values on.
+   * @param {Object} targetInitialValuesObject - The target object to set initial values on.
+   */
+  const initializeFieldState = (
+    fieldConfig,
+    pathPrefix,
+    targetValuesObject,
+    targetInitialValuesObject
+  ) => {
+    const fullPath = pathPrefix + fieldConfig.propertyName;
+    const initialValue = fieldConfig.hasOwnProperty("value")
+      ? fieldConfig.value
+      : undefined;
+
+    targetValuesObject[fieldConfig.propertyName] = initialValue;
+    targetInitialValuesObject[fieldConfig.propertyName] =
+      initialValue !== undefined
+        ? JSON.parse(JSON.stringify(initialValue))
+        : undefined;
+
+    formFieldsTouchedState[fullPath] = false;
+    formFieldsDirtyState[fullPath] = false;
+    formFieldsValidity[fullPath] = undefined;
+    formFieldsErrorMessages[fullPath] = undefined;
   };
 
   /**
@@ -93,321 +126,689 @@ export function useFormValidation(fields, options = {}) {
    * for all fields and sub-form fields based on their configuration.
    * @private
    * @param {Array<FieldConfig>} currentFields - The array of field configurations to process.
-   * @param {Object<string, any>} initialValuesContainer - The object to populate with initial field values for dirty checking.
-   * @param {Object<string, any>} currentValuesContainer - The reactive object to populate with current field values.
+   * @param {string} currentPathPrefix - The current path prefix for nested structures.
+   * @param {Object} currentModelTarget - The current target object for field values.
+   * @param {Object} currentInitialValuesTarget - The current target object for initial values.
    */
-  const initializeStatesRecursive = (currentFields, initialValuesContainer, currentValuesContainer) => {
+  const initFormStates = (
+    currentFields,
+    currentPathPrefix = "",
+    currentModelTarget = formFieldsValues,
+    currentInitialValuesTarget = initialFormFieldsValues
+  ) => {
     if (currentFields && Array.isArray(currentFields)) {
       currentFields.forEach((field) => {
         const key = field.propertyName || field.subForm;
         if (!key) return;
 
-        if (field.subForm && field.fields) {
-          initialValuesContainer[key] = {};
-          currentValuesContainer[key] = reactive({});
-          formFieldsTouchedState[key] = false;
-          formFieldsDirtyState[key] = false;
-          formFieldsValidity[key] = undefined;
-          formFieldsErrorMessages[key] = undefined;
-          initializeStatesRecursive(field.fields, initialValuesContainer[key], currentValuesContainer[key]);
+        const fullPath = currentPathPrefix + key;
+
+        if (field.type === "list") {
+          currentModelTarget[key] =
+            field.initialValue && Array.isArray(field.initialValue)
+              ? [...field.initialValue]
+              : [];
+          currentInitialValuesTarget[key] =
+            field.initialValue && Array.isArray(field.initialValue)
+              ? JSON.parse(JSON.stringify(field.initialValue))
+              : [];
+
+          formFieldsTouchedState[fullPath] = false;
+          formFieldsDirtyState[fullPath] = false;
+
+          currentModelTarget[key].forEach((item, index) => {
+            const itemPathPrefix = `${fullPath}[${index}].`;
+            if (typeof item !== "object" || item === null) {
+              currentModelTarget[key][index] = {};
+            }
+            if (
+              typeof currentInitialValuesTarget[key][index] !== "object" ||
+              currentInitialValuesTarget[key][index] === null
+            ) {
+              currentInitialValuesTarget[key][index] = {};
+            }
+            if (Array.isArray(field.fields)) {
+              field.fields.forEach((listItemField) => {
+                if (listItemField.propertyName) {
+                  // Ensure listItemField has a propertyName
+                  initializeFieldState(
+                    listItemField,
+                    itemPathPrefix,
+                    currentModelTarget[key][index],
+                    currentInitialValuesTarget[key][index]
+                  );
+                }
+              });
+            }
+          });
+        } else if (field.subForm && field.fields) {
+          currentModelTarget[key] = currentModelTarget[key] || {};
+          currentInitialValuesTarget[key] =
+            currentInitialValuesTarget[key] || {};
+          formFieldsTouchedState[fullPath] = false;
+          formFieldsDirtyState[fullPath] = false;
+          formFieldsValidity[fullPath] = undefined;
+          formFieldsErrorMessages[fullPath] = undefined;
+          initFormStates(
+            field.fields,
+            `${fullPath}.`,
+            currentModelTarget[key],
+            currentInitialValuesTarget[key]
+          );
         } else if (field.propertyName) {
-          const initialValue = field.hasOwnProperty("value") ? field.value : undefined;
-          currentValuesContainer[field.propertyName] = initialValue;
-          initialValuesContainer[field.propertyName] = initialValue !== undefined ? JSON.parse(JSON.stringify(initialValue)) : undefined;
-          formFieldsTouchedState[field.propertyName] = false;
-          formFieldsDirtyState[field.propertyName] = false;
-          formFieldsValidity[field.propertyName] = undefined;
-          formFieldsErrorMessages[field.propertyName] = undefined;
+          const initialValue = field.hasOwnProperty("value")
+            ? field.value
+            : undefined;
+          currentModelTarget[field.propertyName] = initialValue;
+          currentInitialValuesTarget[field.propertyName] =
+            initialValue !== undefined
+              ? JSON.parse(JSON.stringify(initialValue))
+              : undefined;
+          formFieldsTouchedState[fullPath] = false;
+          formFieldsDirtyState[fullPath] = false;
+          formFieldsValidity[fullPath] = undefined;
+          formFieldsErrorMessages[fullPath] = undefined;
         }
       });
     }
   };
 
-  /**
-   * Initializes all form field states upon composable setup.
-   * @private
-   */
-  const initFormStates = () => {
-    initializeStatesRecursive(fields, initialFormFieldsValues, formFieldsValues);
-  };
-
-  initFormStates();
+  initFormStates(fields);
 
   /**
    * Updates the stored initial value of a field. This is primarily used for dirty state calculation
    * when the parent form's model provides new baseline values.
-   * Note: Current implementation primarily supports top-level fields.
-   * @param {string} fieldName - The `propertyName` of the field.
+   * @param {string} fieldPath - The path of the field (supports nested paths like 'profile.name' or 'contacts[0].name').
    * @param {any} value - The new initial value for the field.
    */
-  const updateFieldInitialValue = (fieldName, value) => {
-     const fieldConfig = findFieldConfig(fieldName, fields); // Find the config to ensure we're dealing with a defined field
-     if (fieldConfig && fieldConfig.propertyName) { // Ensure it's a direct field property
-        const serializedValue = value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
-        initialFormFieldsValues[fieldConfig.propertyName] = serializedValue;
+  const updateFieldInitialValue = (fieldPath, value) => {
+    const fieldConfig = findFieldConfig(fieldPath, fields); // Find the config to ensure we're dealing with a defined field
+    if (fieldConfig && fieldConfig.propertyName) {
+      // Ensure it's a direct field property
+      const serializedValue =
+        value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
 
-        // If the reactive formFieldsValues was undefined (e.g. field added dynamically or init with no value),
-        // set it and reset dirty state.
-        if (formFieldsValues[fieldConfig.propertyName] === undefined && value !== undefined) {
-          formFieldsValues[fieldConfig.propertyName] = value;
-          formFieldsDirtyState[fieldConfig.propertyName] = false;
+      // Handle nested paths
+      const pathParts = fieldPath.split(".");
+      let currentTarget = initialFormFieldsValues;
+
+      for (let i = 0; i < pathParts.length - 1; i++) {
+        const part = pathParts[i];
+        if (!currentTarget[part]) {
+          currentTarget[part] = {};
         }
+        currentTarget = currentTarget[part];
       }
-  };
 
-  /**
-   * Updates the validation state (validity and error message) for a given field.
-   * @private
-   * @param {string} fieldName - The `propertyName` of the field.
-   * @param {boolean|string|string[]|undefined} validityOrMsg - `true` if valid, an error message (string or array of strings) if invalid, or `undefined` to clear existing errors.
-   */
-  const updateValidationState = (fieldName, validityOrMsg) => {
-    if (typeof validityOrMsg === "string" || Array.isArray(validityOrMsg)) {
-      formFieldsValidity[fieldName] = false;
-      formFieldsErrorMessages[fieldName] = validityOrMsg;
-    } else if (validityOrMsg === true || validityOrMsg === undefined) {
-      if (formFieldsValidity[fieldName] === false) { // Only clear if previously invalid
-        formFieldsValidity[fieldName] = undefined;
-        formFieldsErrorMessages[fieldName] = undefined;
+      const finalKey = pathParts[pathParts.length - 1];
+      currentTarget[finalKey] = serializedValue;
+
+      // If the reactive formFieldsValues was undefined (e.g. field added dynamically or init with no value),
+      // set it and reset dirty state.
+      if (
+        getValueByPath(formFieldsValues, fieldPath) === undefined &&
+        value !== undefined
+      ) {
+        setValueByPath(formFieldsValues, fieldPath, value);
+        formFieldsDirtyState[fieldPath] = false;
       }
     }
   };
 
   /**
-   * Resets the validation state (validity and error message) for a specific field, or all fields if no field name is provided.
-   * @param {string} [fieldName] - The `propertyName` of the field to reset. If omitted, resets all fields.
+   * Helper function to get a value by path from an object.
+   * @private
+   * @param {Object} obj - The object to get the value from.
+   * @param {string} path - The path to the value.
+   * @returns {any} The value at the path.
    */
-  const resetValidationState = (fieldName) => {
-    if (fieldName && formFieldsValidity.hasOwnProperty(fieldName)) {
-      formFieldsValidity[fieldName] = undefined;
-      formFieldsErrorMessages[fieldName] = undefined;
-    } else if (!fieldName) {
-      Object.keys(formFieldsValidity).forEach(key => {
+  const getValueByPath = (obj, path) => {
+    return path.split(".").reduce((current, key) => {
+      if (current === null || current === undefined) return undefined;
+
+      // Handle array notation like 'contacts[0]'
+      const arrayMatch = key.match(/^([^[]+)\[(\d+)\]$/);
+      if (arrayMatch) {
+        const [, arrayKey, index] = arrayMatch;
+        return current[arrayKey] && current[arrayKey][parseInt(index)];
+      }
+
+      return current[key];
+    }, obj);
+  };
+
+  /**
+   * Helper function to set a value by path in an object.
+   * @private
+   * @param {Object} obj - The object to set the value in.
+   * @param {string} path - The path to set the value at.
+   * @param {any} value - The value to set.
+   */
+  const setValueByPath = (obj, path, value) => {
+    const pathParts = path.split(".");
+    let current = obj;
+
+    for (let i = 0; i < pathParts.length - 1; i++) {
+      const part = pathParts[i];
+
+      // Handle array notation
+      const arrayMatch = part.match(/^([^[]+)\[(\d+)\]$/);
+      if (arrayMatch) {
+        const [, arrayKey, index] = arrayMatch;
+        if (!current[arrayKey]) current[arrayKey] = [];
+        if (!current[arrayKey][parseInt(index)])
+          current[arrayKey][parseInt(index)] = {};
+        current = current[arrayKey][parseInt(index)];
+      } else {
+        if (!current[part]) current[part] = {};
+        current = current[part];
+      }
+    }
+
+    const finalPart = pathParts[pathParts.length - 1];
+    const arrayMatch = finalPart.match(/^([^[]+)\[(\d+)\]$/);
+    if (arrayMatch) {
+      const [, arrayKey, index] = arrayMatch;
+      if (!current[arrayKey]) current[arrayKey] = [];
+      current[arrayKey][parseInt(index)] = value;
+    } else {
+      current[finalPart] = value;
+    }
+  };
+
+  /**
+   * Updates the validation state (validity and error message) for a given field.
+   * @private
+   * @param {string} fieldPath - The path of the field (supports nested paths).
+   * @param {boolean|string|string[]|undefined} validityOrMsg - `true` if valid, an error message (string or array of strings) if invalid, or `undefined` to clear existing errors.
+   */
+  const updateValidationState = (fieldPath, validityOrMsg) => {
+    if (typeof validityOrMsg === "string" || Array.isArray(validityOrMsg)) {
+      formFieldsValidity[fieldPath] = false;
+      formFieldsErrorMessages[fieldPath] = validityOrMsg;
+    } else if (validityOrMsg === true) {
+      formFieldsValidity[fieldPath] = undefined; // Clear validity (valid state)
+      formFieldsErrorMessages[fieldPath] = undefined; // Clear error messages
+    } else {
+      // validityOrMsg is undefined, clear both validity and error messages
+      formFieldsValidity[fieldPath] = undefined;
+      formFieldsErrorMessages[fieldPath] = undefined;
+    }
+  };
+
+  /**
+   * Finds the field configuration for a given field path.
+   * @private
+   * @param {string} fieldPath - The path of the field to find.
+   * @param {Array<FieldConfig>} searchFields - The fields to search in.
+   * @returns {FieldConfig|null} The field configuration or null if not found.
+   */
+  const findFieldConfig = (fieldPath, searchFields = fields) => {
+    if (!searchFields || !Array.isArray(searchFields)) return null;
+
+    // Handle nested paths like 'profile.firstName' or 'contacts[0].name'
+    const pathParts = fieldPath.split(".");
+    const firstPart = pathParts[0];
+
+    // Check for array notation in the first part
+    const arrayMatch = firstPart.match(/^([^[]+)\[(\d+)\](.*)$/);
+    if (arrayMatch) {
+      const [, listName] = arrayMatch;
+      const listField = searchFields.find(
+        (f) => f.propertyName === listName && f.type === "list"
+      );
+      if (listField && pathParts.length > 1) {
+        // Look for the sub-field in the list's field configuration
+        const subFieldName = pathParts[1];
+        return (
+          listField.fields?.find((f) => f.propertyName === subFieldName) || null
+        );
+      }
+      return listField || null;
+    }
+
+    // Handle regular nested paths
+    if (pathParts.length === 1) {
+      // Direct field
+      return (
+        searchFields.find(
+          (f) => f.propertyName === fieldPath || f.subForm === fieldPath
+        ) || null
+      );
+    } else {
+      // Nested field - find the parent first
+      const parentKey = pathParts[0];
+      const parentField = searchFields.find((f) => f.subForm === parentKey);
+      if (parentField && parentField.fields) {
+        const remainingPath = pathParts.slice(1).join(".");
+        // Find the field in the sub-form
+        const subField = parentField.fields.find(
+          (f) => f.propertyName === remainingPath
+        );
+        return subField || null;
+      }
+    }
+
+    return null;
+  };
+
+  /**
+   * Resets the validation state for a specific field or all fields.
+   * @param {string} [fieldPath] - The path of the field to reset. If not provided, resets all fields.
+   */
+  const resetValidationState = (fieldPath) => {
+    if (fieldPath) {
+      updateValidationState(fieldPath, undefined);
+    } else {
+      // Reset all validation states
+      Object.keys(formFieldsValidity).forEach((key) => {
         formFieldsValidity[key] = undefined;
+      });
+      Object.keys(formFieldsErrorMessages).forEach((key) => {
         formFieldsErrorMessages[key] = undefined;
       });
     }
   };
 
   /**
-   * Finds a field configuration object by its `propertyName` (or `subForm` key).
-   * Supports basic dot-notation for accessing fields within sub-forms (e.g., "address.street").
-   * This is used internally, primarily by `validateField`, to retrieve the rules and settings for a field.
+   * Validates a field using custom validators.
    * @private
-   * @param {string} fieldPath - The property name or path of the field to find.
-   * @param {Array<FieldConfig>} [searchFields=fields] - The array of field configurations to search within.
-   * @returns {FieldConfig|undefined} The field configuration object if found, otherwise `undefined`.
+   * @param {FieldConfig} field - The field configuration.
+   * @param {any} input - The input value to validate.
+   * @param {string} fieldPath - The path of the field.
+   * @returns {boolean|string} True if valid, error message if invalid.
    */
-  const findFieldConfig = (fieldPath, searchFields = fields) => {
-    const parts = fieldPath.split('.');
-    let currentLevelFields = searchFields;
-    let config;
-
-    for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        // Find field by propertyName (for actual fields) or subForm (for sub-form containers)
-        config = currentLevelFields.find(f => (f.propertyName === part) || (f.subForm === part));
-        if (!config) return undefined; // Path part not found
-
-        if (config.subForm && config.fields && i < parts.length - 1) {
-            currentLevelFields = config.fields; // Move into sub-form's fields for next part
-        } else if (i < parts.length - 1) {
-            // Path indicates deeper nesting, but current config is not a sub-form with fields
-            return undefined;
+  const validateWithCustomValidator = (field, input, fieldPath) => {
+    if (field.validators && Array.isArray(field.validators)) {
+      for (const validator of field.validators) {
+        if (typeof validator === "function") {
+          const result = validator(input, getFieldLabel(field), field);
+          if (result !== true) {
+            return result || `${getFieldLabel(field)} is invalid.`;
+          }
         }
+      }
     }
-    return config; // Return the final config found at the end of the path
+    return true;
   };
 
   /**
-   * Validates a single field based on its configuration (rules and custom validators).
-   * Updates reactive validation states: `formFieldsValidity[fieldName]` and `formFieldsErrorMessages[fieldName]`.
-   * The `fieldName` should correspond to a `propertyName` in a `FieldConfig`, even for nested fields.
-   * @param {string} fieldName - The `propertyName` of the field to validate. For nested fields, this is the actual property name, not the full path.
-   * @param {any} value - The current value of the field to validate.
+   * Validates a field using built-in rules.
+   * @private
+   * @param {FieldConfig} field - The field configuration.
+   * @param {any} input - The input value to validate.
+   * @param {string} fieldPath - The path of the field.
+   * @returns {boolean|string} True if valid, error message if invalid.
+   */
+  const validateWithBuiltInRules = (field, input, fieldPath) => {
+    if (field.rules && Array.isArray(field.rules)) {
+      for (const rule of field.rules) {
+        let result;
+        if (typeof rule === "string") {
+          // Simple string rule
+          if (Validation[rule] && typeof Validation[rule] === "function") {
+            result = Validation[rule](input, getFieldLabel(field), field);
+          }
+        } else if (typeof rule === "object" && rule.name) {
+          // Object rule with parameters
+          if (
+            Validation[rule.name] &&
+            typeof Validation[rule.name] === "function"
+          ) {
+            result = Validation[rule.name](
+              input,
+              getFieldLabel(field),
+              field,
+              rule.params || {}
+            );
+          }
+        } else if (rule instanceof RegExp) {
+          // Regular expression rule
+          result =
+            rule.test(String(input)) ||
+            `${getFieldLabel(field)} format is invalid.`;
+        }
+
+        if (result !== true) {
+          return result || `${getFieldLabel(field)} is invalid.`;
+        }
+      }
+    }
+    return true;
+  };
+
+  /**
+   * Validates a single field and updates its validation state.
+   * @param {string} fieldPath - The path of the field to validate.
+   * @param {any} input - The input value to validate.
    * @returns {boolean} True if the field is valid, false otherwise.
    */
-  const validateField = (fieldName, value) => {
-    // `findFieldConfig` is used to get the rules. `fieldName` here should be the actual property key.
-    // If `fieldName` includes '.', `findFieldConfig` will trace it. The `stateKey` will be the final property.
-    const fieldConfig = findFieldConfig(fieldName);
-
-    if (!fieldConfig || !fieldConfig.propertyName) { // Ensure it's a field with a propertyName to store state against
-      // console.warn(`Validation attempt on a field without propertyName or config: ${fieldName}`);
-      // If it's a subForm container without its own rules, it's considered valid by default.
-      // Actual sub-field validation happens via validateFormPurely's recursion.
-      return true;
+  const validateField = (fieldPath, input) => {
+    const fieldConfig = findFieldConfig(fieldPath, fields);
+    if (!fieldConfig) {
+      console.warn(`Field configuration not found for path: ${fieldPath}`);
+      return true; // Assume valid if no config found
     }
 
-    const stateKey = fieldConfig.propertyName; // Validation state is stored against the final propertyName.
-
-    resetValidationState(stateKey);
-    let isValid = true;
-    let errorMessage = undefined;
-    const labelArg = getFieldLabel(fieldConfig);
-
-    if (fieldConfig.validators && Array.isArray(fieldConfig.validators)) {
-      for (const validationFn of fieldConfig.validators) {
-        if (typeof validationFn === "function") {
-          const result = validationFn(value, labelArg);
-          if (typeof result === "string" || (Array.isArray(result) && result.length > 0)) {
-            errorMessage = result; isValid = false; break;
-          }
-        }
-      }
+    // Validate with custom validators first
+    const customResult = validateWithCustomValidator(
+      fieldConfig,
+      input,
+      fieldPath
+    );
+    if (customResult !== true) {
+      updateValidationState(fieldPath, customResult);
+      return false;
     }
 
-    if (isValid && fieldConfig.rules && Array.isArray(fieldConfig.rules)) {
-      for (const rule of fieldConfig.rules) {
-        let ruleResult;
-        if (typeof rule === "string") {
-          ruleResult = Validation[rule] ? Validation[rule](value, labelArg) : undefined;
-        } else if (rule instanceof RegExp) {
-          ruleResult = Validation.matchRegex(value, labelArg, undefined, rule);
-        } else if (typeof rule === "object" && rule !== null && rule.name) {
-          const { name, customErrorMsg, regex, ...otherParams } = rule;
-          if (name === "matchRegex" && regex instanceof RegExp) {
-            ruleResult = Validation.matchRegex(value, labelArg, customErrorMsg, regex);
-          } else if (Validation[name]) {
-            ruleResult = Validation[name](value, labelArg, customErrorMsg, otherParams);
-          }
-        }
-        if (typeof ruleResult === "string" || (Array.isArray(ruleResult) && ruleResult.length > 0)) {
-          errorMessage = ruleResult; isValid = false; break;
-        }
-      }
+    // Validate with built-in rules
+    const rulesResult = validateWithBuiltInRules(fieldConfig, input, fieldPath);
+    if (rulesResult !== true) {
+      updateValidationState(fieldPath, rulesResult);
+      return false;
     }
 
-    updateValidationState(stateKey, isValid ? true : errorMessage);
-    return isValid;
+    // If we get here, the field is valid
+    updateValidationState(fieldPath, true);
+    return true;
   };
 
   /**
-   * Triggers validation for a specific field, typically in response to user interaction like 'input' or 'blur'.
-   * Behavior depends on the `validationTrigger` option and debounce settings.
-   * @param {string} fieldName - The `propertyName` of the field to validate. This should be the specific field key, e.g., "email" or "address.street".
-   * @param {'input' | 'blur'} triggerType - The type of event that triggered this validation.
-   * @param {Object<string, any>} currentFormModel - The complete current model of the form (e.g., `modelValue.value` from `PreskoForm`).
-   *   This is used to extract the field's current value for validation.
+   * Recursively validates form data against field configurations.
+   * @private
+   * @param {Object} formToValidate - The form data to validate.
+   * @param {Array<FieldConfig>} currentFieldsConfig - The current field configurations.
+   * @param {string} pathPrefix - The current path prefix for nested structures.
+   * @returns {boolean} True if all fields are valid, false otherwise.
    */
-  const triggerValidation = (fieldName, triggerType, currentFormModel) => {
-    // Extract the field's value from the provided currentFormModel
-    // Handles basic dot notation for nested field values.
-    let fieldValue;
-    const nameParts = fieldName.split('.');
-    if (nameParts.length > 1) {
-        fieldValue = nameParts.reduce((obj, part) => obj && obj[part], currentFormModel);
+  const validateFormPurelyRecursive = (
+    formToValidate,
+    currentFieldsConfig,
+    pathPrefix = ""
+  ) => {
+    if (!currentFieldsConfig || !Array.isArray(currentFieldsConfig))
+      return true;
+
+    let allValid = true;
+
+    currentFieldsConfig.forEach((field) => {
+      const key = field.propertyName || field.subForm;
+      if (!key) return;
+
+      if (field.type === "list") {
+        // Validate list field
+        const listValue = formToValidate[key];
+        if (Array.isArray(listValue) && Array.isArray(field.fields)) {
+          listValue.forEach((item, index) => {
+            if (typeof item === "object" && item !== null) {
+              field.fields.forEach((subField) => {
+                if (subField.propertyName) {
+                  const subFieldPath = `${pathPrefix}${key}[${index}].${subField.propertyName}`;
+                  const subFieldValue = item[subField.propertyName];
+                  if (!validateField(subFieldPath, subFieldValue)) {
+                    allValid = false;
+                  }
+                }
+              });
+            }
+          });
+        }
+      } else if (field.subForm && field.fields) {
+        // Validate sub-form
+        const subFormValue = formToValidate[key];
+        if (typeof subFormValue === "object" && subFormValue !== null) {
+          // For sub-forms, we need to validate each field in the sub-form directly
+          field.fields.forEach((subField) => {
+            if (subField.propertyName) {
+              const subFieldPath = `${pathPrefix}${field.subForm}.${subField.propertyName}`;
+              const subFieldValue = subFormValue[subField.propertyName];
+              if (!validateField(subFieldPath, subFieldValue)) {
+                allValid = false;
+              }
+            }
+          });
+        }
+      } else if (field.propertyName) {
+        // Validate regular field
+        const fullPath = pathPrefix + field.propertyName;
+        const fieldValue = formToValidate[field.propertyName];
+        if (!validateField(fullPath, fieldValue)) {
+          allValid = false;
+        }
+      }
+    });
+
+    return allValid;
+  };
+
+  /**
+   * Triggers validation for a specific field based on event type and validation settings.
+   * @param {string} fieldPath - The path of the field to validate.
+   * @param {string} triggerType - The type of trigger ('input', 'blur', 'submit').
+   * @param {Object} currentFormModel - The current form model to validate against.
+   */
+  const triggerValidation = (fieldPath, triggerType, currentFormModel) => {
+    // Clear any existing debounce timer for this field
+    if (debounceTimers[fieldPath]) {
+      clearTimeout(debounceTimers[fieldPath]);
+      delete debounceTimers[fieldPath];
+    }
+
+    const shouldValidate =
+      triggerType === "submit" || // Always validate on submit
+      (validationTrigger === "onBlur" &&
+        (triggerType === "blur" || triggerType === "submit")) ||
+      (validationTrigger === "onInput" &&
+        (triggerType === "input" ||
+          triggerType === "blur" ||
+          triggerType === "submit")) ||
+      (validationTrigger === "onSubmit" && triggerType === "submit");
+
+    if (!shouldValidate) return;
+
+    const performValidation = () => {
+      const fieldValue = getValueByPath(currentFormModel, fieldPath);
+      validateField(fieldPath, fieldValue);
+    };
+
+    // Apply debouncing for input events when using onInput trigger
+    if (triggerType === "input" && validationTrigger === "onInput") {
+      debounceTimers[fieldPath] = setTimeout(
+        performValidation,
+        inputDebounceMs
+      );
     } else {
-        fieldValue = currentFormModel[fieldName];
-    }
-
-    const fieldConfig = findFieldConfig(fieldName); // Find config to ensure we operate on a defined field property
-    if (!fieldConfig || !fieldConfig.propertyName) {
-      // console.warn(`triggerValidation called for unconfigured field or subForm container: ${fieldName}`);
-      return;
-    }
-    const stateKey = fieldConfig.propertyName; // Use the actual propertyName for state management and timers
-
-    if (triggerType === "input") {
-      if (options.validationTrigger === "onInput") {
-        if (debounceTimers[stateKey]) {
-          clearTimeout(debounceTimers[stateKey]);
-        }
-        if (formFieldsValidity[stateKey] === false) {
-            formFieldsErrorMessages[stateKey] = undefined; // Clear visual error immediately
-        }
-        debounceTimers[stateKey] = setTimeout(() => {
-          validateField(stateKey, fieldValue);
-        }, options.inputDebounceMs);
-      }
-    } else if (triggerType === "blur") {
-      if (options.validationTrigger === "onBlur" || options.validationTrigger === "onInput") {
-        if (debounceTimers[stateKey]) {
-            clearTimeout(debounceTimers[stateKey]);
-        }
-        validateField(stateKey, fieldValue);
-      }
+      performValidation();
     }
   };
 
   /**
-   * Validates a given data object (representing the entire form's current model) against all field configurations.
-   * This is typically used for form submission. Updates reactive validation states.
-   * @param {Object<string, any>} formToValidate - The complete form model object to validate.
-   * @returns {boolean} `true` if all fields (including those in sub-forms) are valid, `false` otherwise.
+   * Validates the entire form purely (without side effects to internal state).
+   * @param {Object} formToValidate - The form data to validate.
+   * @returns {boolean} True if the entire form is valid, false otherwise.
    */
   const validateFormPurely = (formToValidate) => {
-    let isOverallFormValid = true;
-
-    // Recursive function to validate fields at current level and within sub-forms
-    function validateRecursive(currentFieldsConfig, currentModelSlice) {
-        if (!currentFieldsConfig || !Array.isArray(currentFieldsConfig)) return;
-
-        for (const field of currentFieldsConfig) {
-            const key = field.propertyName || field.subForm;
-            if (!key) continue;
-
-            const valueToValidate = currentModelSlice ? currentModelSlice[key] : undefined;
-
-            if (field.subForm && field.fields) { // This is a sub-form container
-                if (typeof valueToValidate === 'object' && valueToValidate !== null) {
-                    validateRecursive(field.fields, valueToValidate); // Recurse into sub-form
-                } else {
-                    // console.warn(`Sub-form data for '${key}' is missing or not an object.`);
-                    // Potentially validate the sub-form key itself if it has rules (e.g. isRequired for the object)
-                    // For now, if sub-form data is not an object, its fields are not validated.
-                }
-            } else if (field.propertyName) { // This is an actual field with a propertyName
-                if (!validateField(field.propertyName, valueToValidate)) {
-                    isOverallFormValid = false; // Mark overall form as invalid
-                }
-            }
-        }
-    }
-
-    validateRecursive(fields, formToValidate);
-    return isOverallFormValid;
+    return validateFormPurelyRecursive(formToValidate, fields);
   };
 
   /**
-   * Sets the touched state for a given field.
-   * @param {string} fieldName - The `propertyName` of the field (can be a sub-form key).
-   * @param {boolean} [touched=true] - The touched state to set.
-   * @returns {boolean} `true` if the state was changed, `false` otherwise.
+   * Sets the touched state of a field.
+   * @param {string} fieldPath - The path of the field.
+   * @param {boolean} touched - The touched state to set.
+   * @returns {boolean} True if the touched state changed, false otherwise.
    */
-  const setFieldTouched = (fieldName, touched = true) => {
-    if (formFieldsTouchedState.hasOwnProperty(fieldName)) {
-      if (formFieldsTouchedState[fieldName] !== touched) {
-        formFieldsTouchedState[fieldName] = touched;
-        return true;
-      }
-    } else { // If fieldName was not in state (e.g. newly added or subform container), add it.
-      formFieldsTouchedState[fieldName] = touched;
-      return true;
+  const setFieldTouched = (fieldPath, touched = true) => {
+    const currentTouchedState = formFieldsTouchedState[fieldPath];
+    if (currentTouchedState !== touched) {
+      formFieldsTouchedState[fieldPath] = touched;
+      return true; // State changed
     }
-    return false;
+    return false; // State didn't change
   };
 
   /**
-   * Checks if a field's current value differs from its stored initial value and updates its dirty state.
-   * Uses `JSON.stringify` for a basic deep comparison.
-   * Note: Current implementation primarily supports top-level fields for `fieldName`.
-   * @param {string} fieldName - The `propertyName` of the field.
+   * Checks if a field's current value differs from its initial value and updates dirty state.
+   * @param {string} fieldPath - The path of the field.
    * @param {any} currentValue - The current value of the field.
-   * @returns {boolean} `true` if the dirty state was changed, `false` otherwise.
+   * @returns {boolean} True if the dirty state changed, false otherwise.
    */
-  const checkFieldDirty = (fieldName, currentValue) => {
-    const fieldConfig = findFieldConfig(fieldName, fields);
-    if (fieldConfig && fieldConfig.propertyName && initialFormFieldsValues.hasOwnProperty(fieldConfig.propertyName)) {
-      const stateKey = fieldConfig.propertyName;
-      const oldIsDirty = formFieldsDirtyState[stateKey];
-      const newIsDirty = JSON.stringify(currentValue) !== JSON.stringify(initialFormFieldsValues[stateKey]);
-      if (oldIsDirty !== newIsDirty) {
-        formFieldsDirtyState[stateKey] = newIsDirty;
-        return true;
-      }
+  const checkFieldDirty = (fieldPath, currentValue) => {
+    const initialValue = getValueByPath(initialFormFieldsValues, fieldPath);
+    const isDirty =
+      JSON.stringify(currentValue) !== JSON.stringify(initialValue);
+    const currentDirtyState = formFieldsDirtyState[fieldPath];
+
+    if (currentDirtyState !== isDirty) {
+      formFieldsDirtyState[fieldPath] = isDirty;
+      return true; // State changed
     }
-    return false;
+    return false; // State didn't change
+  };
+
+  /**
+   * Adds an item to a list field.
+   * @param {string} listFieldPath - The path of the list field.
+   * @param {Object} [itemData] - The data for the new item. If not provided, uses default values.
+   */
+  const addItem = (listFieldPath, itemData) => {
+    const listFieldConfig = findFieldConfig(listFieldPath, fields);
+    if (!listFieldConfig || listFieldConfig.type !== "list") {
+      console.warn(
+        `List field configuration not found for path: ${listFieldPath}`
+      );
+      return;
+    }
+
+    const currentList = formFieldsValues[listFieldPath] || [];
+    let newItem = {};
+
+    if (itemData && typeof itemData === "object") {
+      newItem = { ...itemData };
+    } else if (
+      listFieldConfig.defaultValue &&
+      typeof listFieldConfig.defaultValue === "object"
+    ) {
+      newItem = JSON.parse(JSON.stringify(listFieldConfig.defaultValue));
+    } else if (Array.isArray(listFieldConfig.fields)) {
+      // Build default item from field configurations
+      listFieldConfig.fields.forEach((field) => {
+        if (field.propertyName) {
+          newItem[field.propertyName] = field.hasOwnProperty("value")
+            ? field.value
+            : undefined;
+        }
+      });
+    }
+
+    const newList = [...currentList, newItem];
+    formFieldsValues[listFieldPath] = newList;
+
+    // Initialize validation states for the new item's fields
+    const newIndex = newList.length - 1;
+    if (Array.isArray(listFieldConfig.fields)) {
+      listFieldConfig.fields.forEach((field) => {
+        if (field.propertyName) {
+          const fieldPath = `${listFieldPath}[${newIndex}].${field.propertyName}`;
+          formFieldsTouchedState[fieldPath] = false;
+          formFieldsDirtyState[fieldPath] = false;
+          formFieldsValidity[fieldPath] = undefined;
+          formFieldsErrorMessages[fieldPath] = undefined;
+
+          // Update initial values
+          if (!initialFormFieldsValues[listFieldPath]) {
+            initialFormFieldsValues[listFieldPath] = [];
+          }
+          if (!initialFormFieldsValues[listFieldPath][newIndex]) {
+            initialFormFieldsValues[listFieldPath][newIndex] = {};
+          }
+          initialFormFieldsValues[listFieldPath][newIndex][field.propertyName] =
+            newItem[field.propertyName] !== undefined
+              ? JSON.parse(JSON.stringify(newItem[field.propertyName]))
+              : undefined;
+        }
+      });
+    }
+  };
+
+  /**
+   * Removes an item from a list field.
+   * @param {string} listFieldPath - The path of the list field.
+   * @param {number} index - The index of the item to remove.
+   */
+  const removeItem = (listFieldPath, index) => {
+    const listFieldConfig = findFieldConfig(listFieldPath, fields);
+    if (!listFieldConfig || listFieldConfig.type !== "list") {
+      console.warn(
+        `List field configuration not found for path: ${listFieldPath}`
+      );
+      return;
+    }
+
+    const currentList = formFieldsValues[listFieldPath] || [];
+    if (index < 0 || index >= currentList.length) return;
+
+    // Clean up validation states for the removed item's fields
+    if (Array.isArray(listFieldConfig.fields)) {
+      listFieldConfig.fields.forEach((field) => {
+        if (field.propertyName) {
+          const fieldPath = `${listFieldPath}[${index}].${field.propertyName}`;
+          delete formFieldsTouchedState[fieldPath];
+          delete formFieldsDirtyState[fieldPath];
+          delete formFieldsValidity[fieldPath];
+          delete formFieldsErrorMessages[fieldPath];
+        }
+      });
+    }
+
+    // Remove the item
+    const newList = currentList.filter((_, i) => i !== index);
+    formFieldsValues[listFieldPath] = newList;
+
+    // Update initial values
+    if (
+      initialFormFieldsValues[listFieldPath] &&
+      Array.isArray(initialFormFieldsValues[listFieldPath])
+    ) {
+      initialFormFieldsValues[listFieldPath].splice(index, 1);
+    }
+
+    // Re-index validation states for remaining items
+    if (Array.isArray(listFieldConfig.fields)) {
+      const itemsToReindex = newList.slice(index);
+      itemsToReindex.forEach((_, relativeIndex) => {
+        const oldIndex = index + relativeIndex + 1; // +1 because we removed one item
+        const newIndex = index + relativeIndex;
+
+        listFieldConfig.fields.forEach((field) => {
+          if (field.propertyName) {
+            const oldFieldPath = `${listFieldPath}[${oldIndex}].${field.propertyName}`;
+            const newFieldPath = `${listFieldPath}[${newIndex}].${field.propertyName}`;
+
+            // Move validation states
+            if (formFieldsTouchedState[oldFieldPath] !== undefined) {
+              formFieldsTouchedState[newFieldPath] =
+                formFieldsTouchedState[oldFieldPath];
+              delete formFieldsTouchedState[oldFieldPath];
+            }
+            if (formFieldsDirtyState[oldFieldPath] !== undefined) {
+              formFieldsDirtyState[newFieldPath] =
+                formFieldsDirtyState[oldFieldPath];
+              delete formFieldsDirtyState[oldFieldPath];
+            }
+            if (formFieldsValidity[oldFieldPath] !== undefined) {
+              formFieldsValidity[newFieldPath] =
+                formFieldsValidity[oldFieldPath];
+              delete formFieldsValidity[oldFieldPath];
+            }
+            if (formFieldsErrorMessages[oldFieldPath] !== undefined) {
+              formFieldsErrorMessages[newFieldPath] =
+                formFieldsErrorMessages[oldFieldPath];
+              delete formFieldsErrorMessages[oldFieldPath];
+            }
+          }
+        });
+      });
+    }
   };
 
   return {
@@ -423,5 +824,7 @@ export function useFormValidation(fields, options = {}) {
     updateFieldInitialValue,
     triggerValidation,
     resetValidationState,
+    addItem,
+    removeItem,
   };
 }

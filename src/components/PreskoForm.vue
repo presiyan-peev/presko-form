@@ -19,9 +19,11 @@
             v-for="(field, i) in fields"
             :key="field.propertyName || field.subForm || i"
           >
+            <!-- Sub-Form Rendering -->
+            <!-- Corrected ref handling for arrays -->
             <PreskoForm
               v-if="field.subForm"
-              ref="subFormRefs"
+              :ref="(el) => el && subFormRefs.push(el)"
               v-model="modelValue[field.subForm]"
               :fields="field.fields"
               :error-props="props.errorProps"
@@ -35,13 +37,90 @@
                 (value) => handleSubFormModelUpdate(field.subForm, value)
               "
               @field:touched="
-                handleSubFormEvent('field:touched', field.subForm, $event)
+                (eventData) =>
+                  handleSubFormEvent('field:touched', field.subForm, eventData)
               "
               @field:dirty="
-                handleSubFormEvent('field:dirty', field.subForm, $event)
+                (eventData) =>
+                  handleSubFormEvent('field:dirty', field.subForm, eventData)
               "
               @submit:reject="handleSubFormSubmitReject"
-            />
+            ></PreskoForm>
+            <!-- List Field Rendering -->
+            <div v-else-if="field.type === 'list'" class="presko-list-field">
+              <div class="presko-list-field-header">
+                <label>{{ field.label || field.propertyName }}</label>
+                <button
+                  type="button"
+                  @click="handleAddItem(field.propertyName)"
+                  class="presko-list-add-btn"
+                >
+                  Add {{ field.itemLabel || "Item" }}
+                </button>
+              </div>
+              <!-- Consider a more robust key if items can be reordered significantly and have unique IDs -->
+              <div
+                v-for="(item, index) in modelValue[field.propertyName]"
+                :key="index"
+                class="presko-list-item"
+              >
+                <div class="presko-list-item-fields">
+                  <PreskoFormItem
+                    v-for="listItemField in field.fields"
+                    :key="listItemField.propertyName"
+                    :modelValue="item[listItemField.propertyName]"
+                    @update:modelValue="
+                      (value) =>
+                        handleListItemFieldModelUpdate(
+                          field.propertyName,
+                          index,
+                          listItemField.propertyName,
+                          value
+                        )
+                    "
+                    :field="listItemField"
+                    :error-props="props.errorProps"
+                    :isTouched="
+                      formFieldsTouchedState[
+                        `${field.propertyName}[${index}].${listItemField.propertyName}`
+                      ] || false
+                    "
+                    :isDirty="
+                      formFieldsDirtyState[
+                        `${field.propertyName}[${index}].${listItemField.propertyName}`
+                      ] || false
+                    "
+                    :fieldStateProps="props.fieldStateProps"
+                    :validity-state="{
+                      hasErrors:
+                        formFieldsValidity[
+                          `${field.propertyName}[${index}].${listItemField.propertyName}`
+                        ] === false,
+                      errMsg:
+                        formFieldsErrorMessages[
+                          `${field.propertyName}[${index}].${listItemField.propertyName}`
+                        ],
+                    }"
+                    @field-blurred="
+                      () =>
+                        handleListItemFieldBlurred(
+                          field.propertyName,
+                          index,
+                          listItemField.propertyName
+                        )
+                    "
+                  ></PreskoFormItem>
+                </div>
+                <button
+                  type="button"
+                  @click="handleRemoveItem(field.propertyName, index)"
+                  class="presko-list-remove-btn"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+            <!-- Regular Field Rendering -->
             <PreskoFormItem
               v-else-if="field.propertyName"
               :modelValue="modelValue[field.propertyName]"
@@ -57,7 +136,10 @@
                 hasErrors: formFieldsValidity[field.propertyName] === false,
                 errMsg: formFieldsErrorMessages[field.propertyName],
               }"
-              @field-blurred="handleFieldBlurred"
+              @field-blurred="
+                (emittedPropertyName) =>
+                  handleFieldBlurred(emittedPropertyName, field.propertyName)
+              "
               @field-input="handleFieldInput"
             ></PreskoFormItem>
           </div>
@@ -257,10 +339,25 @@ const initializeModel = (fieldsToInit) => {
       const key = field.propertyName || field.subForm;
       if (!key) return;
 
-      let keyNeedsInitialization = !Object.prototype.hasOwnProperty.call(tempModel, key);
+      let keyNeedsInitialization = !Object.prototype.hasOwnProperty.call(
+        tempModel,
+        key
+      );
 
-      if (field.subForm) {
-        if (keyNeedsInitialization || typeof tempModel[key] !== "object" || tempModel[key] === null) {
+      if (field.type === "list") {
+        if (keyNeedsInitialization || !Array.isArray(tempModel[key])) {
+          tempModel[key] =
+            field.initialValue && Array.isArray(field.initialValue)
+              ? [...field.initialValue]
+              : [];
+          modelWasModified = true;
+        }
+      } else if (field.subForm) {
+        if (
+          keyNeedsInitialization ||
+          typeof tempModel[key] !== "object" ||
+          tempModel[key] === null
+        ) {
           tempModel[key] = {};
           modelWasModified = true;
         }
@@ -273,7 +370,9 @@ const initializeModel = (fieldsToInit) => {
         }
       } else if (field.propertyName) {
         if (keyNeedsInitialization) {
-          tempModel[key] = field.hasOwnProperty("value") ? field.value : undefined;
+          tempModel[key] = field.hasOwnProperty("value")
+            ? field.value
+            : undefined;
           modelWasModified = true;
         }
       }
@@ -290,6 +389,7 @@ initializeModel(props.fields);
 
 // Initialize form validation composable
 const {
+  formFieldsValues, // Internal reactive state for values in useFormValidation
   formFieldsValidity,
   formFieldsErrorMessages,
   validateFormPurely,
@@ -311,18 +411,35 @@ watch(
   (newModelValue, oldModelValue) => {
     if (newModelValue && typeof newModelValue === "object") {
       props.fields.forEach((field) => {
-        if (field.propertyName && newModelValue.hasOwnProperty(field.propertyName)) {
-          const oldValueForDirtyCheck = oldModelValue && typeof oldModelValue === "object"
-            ? oldModelValue[field.propertyName]
-            : undefined;
+        if (
+          field.propertyName &&
+          newModelValue.hasOwnProperty(field.propertyName)
+        ) {
+          const oldValueForDirtyCheck =
+            oldModelValue && typeof oldModelValue === "object"
+              ? oldModelValue[field.propertyName]
+              : undefined;
 
           // Update initial value in useFormValidation if this is the first time we get a real value
-          if (updateFieldInitialValue && oldValueForDirtyCheck === undefined && newModelValue[field.propertyName] !== undefined) {
-            updateFieldInitialValue(field.propertyName, newModelValue[field.propertyName]);
+          if (
+            updateFieldInitialValue &&
+            oldValueForDirtyCheck === undefined &&
+            newModelValue[field.propertyName] !== undefined
+          ) {
+            updateFieldInitialValue(
+              field.propertyName,
+              newModelValue[field.propertyName]
+            );
           }
 
           // Check and emit dirty state
-          if (checkFieldDirty && checkFieldDirty(field.propertyName, newModelValue[field.propertyName])) {
+          if (
+            checkFieldDirty &&
+            checkFieldDirty(
+              field.propertyName,
+              newModelValue[field.propertyName]
+            )
+          ) {
             emit("field:dirty", {
               propertyName: field.propertyName,
               dirty: formFieldsDirtyState[field.propertyName],
@@ -393,17 +510,19 @@ const handleFieldInput = (propertyName) => {
 const handleSubFormEvent = (eventName, subFormKey, eventData) => {
   const fullPropertyName = `${subFormKey}.${eventData.propertyName}`;
   if (eventName === "field:touched") {
-    if (setFieldTouched(subFormKey, true)) { // Mark the sub-form container as touched
+    if (setFieldTouched(subFormKey, true)) {
+      // Mark the sub-form container as touched
       emit("field:touched", { propertyName: subFormKey, touched: true });
     }
-    emit("field:touched", { // Relay the granular event
+    emit("field:touched", {
+      // Relay the granular event
       propertyName: fullPropertyName,
       touched: eventData.touched,
     });
   } else if (eventName === "field:dirty") {
-     // For sub-form dirty state, PreskoForm primarily relies on changes to its modelValue.
-     // However, emitting granular dirty events can be useful for consumers.
-     // The sub-form container's dirty state is managed by `checkFieldDirty` on `modelValue.value` changes.
+    // For sub-form dirty state, PreskoForm primarily relies on changes to its modelValue.
+    // However, emitting granular dirty events can be useful for consumers.
+    // The sub-form container's dirty state is managed by `checkFieldDirty` on `modelValue.value` changes.
     emit("field:dirty", {
       propertyName: fullPropertyName,
       dirty: eventData.dirty,
@@ -439,7 +558,8 @@ const handleFormSubmit = () => {
   if (props.fields && Array.isArray(props.fields)) {
     props.fields.forEach((field) => {
       const key = field.propertyName || field.subForm;
-      if (key) { // Ensure key exists
+      if (key) {
+        // Ensure key exists
         if (setFieldTouched(key, true)) {
           emit("field:touched", {
             propertyName: key,
@@ -508,19 +628,170 @@ const handleFieldModelUpdate = (propertyName, value) => {
       [propertyName]: value,
     };
     modelValue.value = updatedModel; // Update local model
-     // Emit update for v-model binding on PreskoForm itself
+    // Emit update for v-model binding on PreskoForm itself
     emit("update:modelValue", updatedModel);
+  }
+};
+
+/**
+ * Handles adding a new item to a list field.
+ * @param {string} listPropertyName - The propertyName of the list field.
+ */
+const handleAddItem = (listPropertyName) => {
+  const listFieldConfig = props.fields.find(
+    (f) => f.propertyName === listPropertyName && f.type === "list"
+  );
+  if (!listFieldConfig) return;
+
+  let newItemInitialData = {};
+  if (
+    listFieldConfig.defaultValue &&
+    typeof listFieldConfig.defaultValue === "object"
+  ) {
+    newItemInitialData = JSON.parse(
+      JSON.stringify(listFieldConfig.defaultValue)
+    );
+  } else if (Array.isArray(listFieldConfig.fields)) {
+    listFieldConfig.fields.forEach((subField) => {
+      if (subField.propertyName) {
+        newItemInitialData[subField.propertyName] = subField.hasOwnProperty(
+          "value"
+        )
+          ? subField.value
+          : undefined;
+      }
+    });
+  }
+
+  const currentList = modelValue.value[listPropertyName] || [];
+  const newList = [...currentList, newItemInitialData];
+  const updatedModel = { ...modelValue.value, [listPropertyName]: newList };
+  modelValue.value = updatedModel;
+  emit("update:modelValue", updatedModel);
+};
+
+/**
+ * Handles removing an item from a list field.
+ * @param {string} listPropertyName - The propertyName of the list field.
+ * @param {number} index - The index of the item to remove.
+ */
+const handleRemoveItem = (listPropertyName, index) => {
+  const currentList = modelValue.value[listPropertyName] || [];
+  if (index < 0 || index >= currentList.length) return;
+
+  const newList = currentList.filter((_, i) => i !== index);
+  const updatedModel = { ...modelValue.value, [listPropertyName]: newList };
+  modelValue.value = updatedModel;
+  emit("update:modelValue", updatedModel);
+};
+
+/**
+ * Handles updates to the model value of a field within a list item.
+ * @param {string} listName - The propertyName of the list field.
+ * @param {number} itemIndex - The index of the item in the list.
+ * @param {string} itemFieldName - The propertyName of the field within the list item.
+ * @param {any} value - The new value for the field.
+ */
+const handleListItemFieldModelUpdate = (
+  listName,
+  itemIndex,
+  itemFieldName,
+  value
+) => {
+  if (
+    typeof modelValue.value === "object" &&
+    modelValue.value !== null &&
+    modelValue.value[listName] &&
+    Array.isArray(modelValue.value[listName]) &&
+    modelValue.value[listName][itemIndex] !== undefined
+  ) {
+    const newList = [...modelValue.value[listName]];
+    const newItem = { ...newList[itemIndex], [itemFieldName]: value };
+    newList[itemIndex] = newItem;
+    const newMainModel = { ...modelValue.value, [listName]: newList };
+    modelValue.value = newMainModel;
+    emit("update:modelValue", newMainModel);
+  }
+};
+
+/**
+ * Handles the blur event for a field within a list item.
+ * @param {string} listName - The propertyName of the list field.
+ * @param {number} itemIndex - The index of the item in the list.
+ * @param {string} itemFieldName - The propertyName of the field within the list item.
+ */
+const handleListItemFieldBlurred = (listName, itemIndex, itemFieldName) => {
+  const fullPath = `${listName}[${itemIndex}].${itemFieldName}`;
+  const touchedChanged = setFieldTouched(fullPath, true);
+  if (touchedChanged) {
+    emit("field:touched", {
+      propertyName: fullPath,
+      touched: formFieldsTouchedState[fullPath],
+    });
+  }
+  if (typeof triggerValidation === "function") {
+    triggerValidation(fullPath, "blur", modelValue.value);
   }
 };
 
 // Expose methods for parent components, e.g., for programmatic submission.
 defineExpose({
   handleFormSubmit,
+  handleAddItem,
+  handleRemoveItem,
 });
 </script>
 
 <style scoped>
+/* Basic styling for list items, customize as needed */
+.presko-list-field {
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+  border: 1px solid #eee;
+  border-radius: 4px;
+}
+.presko-list-field-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.presko-list-item {
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  border: 1px dashed #ccc;
+  border-radius: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.presko-list-item-fields {
+  flex-grow: 1;
+  margin-right: 0.5rem; /* Space before remove button */
+}
+
+.presko-list-add-btn,
+.presko-list-remove-btn {
+  /* Add your button styles */
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  border: 1px solid #ccc;
+  background-color: #f9f9f9;
+  border-radius: 3px;
+}
+.presko-list-add-btn:hover,
+.presko-list-remove-btn:hover {
+  background-color: #f0f0f0;
+}
+.presko-form-title {
+  font-size: 1.5em;
+  margin-bottom: 1em;
+}
+.presko-form-fields-wrapper > div {
+  margin-bottom: 1em; /* Add space between form items/groups */
+}
 .read-the-docs {
+  /* From original scaffold, can be removed if not used */
   color: #888;
 }
 </style>
