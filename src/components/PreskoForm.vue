@@ -20,9 +20,10 @@
             :key="field.propertyName || field.subForm || i"
           >
             <!-- Sub-Form Rendering -->
+            <!-- Corrected ref handling for arrays -->
             <PreskoForm
               v-if="field.subForm"
-              :ref="(el) => el && subFormRefs.push(el)" {{/* Corrected ref handling for arrays */}}
+              :ref="(el) => el && subFormRefs.push(el)"
               v-model="modelValue[field.subForm]"
               :fields="field.fields"
               :error-props="props.errorProps"
@@ -40,7 +41,7 @@
                 (eventData) => handleSubFormEvent('field:dirty', field.subForm, eventData)
               "
               @submit:reject="handleSubFormSubmitReject"
-            />
+            ></PreskoForm>
             <!-- List Field Rendering -->
             <div v-else-if="field.type === 'list'" class="presko-list-field">
               <div class="presko-list-field-header">
@@ -53,9 +54,10 @@
                   Add {{ field.itemLabel || "Item" }}
                 </button>
               </div>
+              <!-- Consider a more robust key if items can be reordered significantly and have unique IDs -->
               <div
                 v-for="(item, index) in modelValue[field.propertyName]"
-                :key="index" {{/* Consider a more robust key if items can be reordered significantly and have unique IDs */}}
+                :key="index"
                 class="presko-list-item"
               >
                 <div class="presko-list-item-fields">
@@ -96,7 +98,7 @@
                         ],
                     }"
                     @field-blurred="
-                      () => {{/* Pass only necessary info, PreskoFormItem emits propertyName */}}
+                      () =>
                         handleListItemFieldBlurred(
                           field.propertyName,
                           index,

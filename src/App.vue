@@ -210,7 +210,7 @@ function addAttendee() {
       submit-component="AppSubmit"
       @submit="handleFormSubmit"
       @submit:reject="handleFormReject"
-      :error-props="{ errorMessagesType: 'string' }" {{// To ensure single error string is passed}}
+      :error-props="{ errorMessagesType: 'string' }" <!-- To ensure single error string is passed -->
     >
       <template #title>
         <h2>Event Registration Form</h2>
@@ -221,7 +221,7 @@ function addAttendee() {
     </PreskoForm>
 
     <!-- This button is outside the form, shows how to call exposed methods -->
-    <button type_button @click="addAttendee" class="external-add-button">Add Attendee Programmatically</button>
+    <button type="button" @click="addAttendee" class="external-add-button">Add Attendee Programmatically</button>
 
     <div class="form-data-display">
       <h3>Current Form Data (formData):</h3>
