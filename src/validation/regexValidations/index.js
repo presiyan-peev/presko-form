@@ -62,3 +62,10 @@ export function isIPv6Address(value, label, customErrorMsg) {
   }
   return `Field ${label} is not a valid IPv6 address.`; // Specific default message
 }
+
+export function isString(value, label = "This field", customErrorMsg) {
+  if (value === null || value === undefined || typeof value === "string") {
+    return true;
+  }
+  return customErrorMsg || `${label} must be a string.`;
+}

@@ -5,10 +5,13 @@ import {
   isDomain,
   isIPv4Address,
   isIPv6Address,
+  isString,
 } from "./regexValidations";
 
 export default {
+  isRequired: isRequired,
   required: isRequired,
+  string: isString,
   email: isEmail,
   domain: isDomain,
   ipv4: isIPv4Address,
