@@ -1,4 +1,4 @@
-import { reactive, toRaw } from "vue"; // Added toRaw for accessing raw values if needed
+import { reactive, toRaw, watch } from "vue"; // Added toRaw for accessing raw values if needed, watch for reacting to model changes
 import Validation from "../validation";
 
 /**
@@ -14,6 +14,19 @@ import Validation from "../validation";
  * @property {string} [type] - Type of field, e.g., 'list' for list fields.
  * @property {Array} [initialValue] - Initial value for list fields.
  * @property {Object} [defaultValue] - Default value template for new list items.
+ * @property {Object} [condition] - Configuration for conditional display of this field.
+ * @property {'AND' | 'OR'} [condition.logic='AND'] - How to combine multiple rules. Defaults to 'AND'.
+ * @property {Array<ConditionRule>} condition.rules - An array of rules that must be met for the field to be visible.
+ * @property {boolean} [clearValueOnHide=false] - If true, the field's value will be reset when it's hidden. Defaults to false.
+ */
+
+/**
+ * @typedef {Object} ConditionRule
+ * @property {string} field - Path to the source field (e.g., 'user.type', 'notificationsEnabled', 'contactMethods[0].type').
+ *                           Supports dot notation for nested objects and array indexing for list items.
+ * @property {'equals'|'notEquals'|'in'|'notIn'|'greaterThan'|'lessThan'|'greaterThanOrEquals'|'lessThanOrEquals'|'defined'|'undefined'|'matchesRegex'} operator - The comparison operator.
+ * @property {any} [value] - The value to compare against (required for most operators).
+ *                         For 'in'/'notIn', if `value` is a string, it will be treated as a comma-separated list.
  */
 
 /**
@@ -47,6 +60,8 @@ import Validation from "../validation";
  *   `true` if the field has been interacted with (e.g., blurred). Field names are used as keys.
  * @property {Object<string, boolean>} formFieldsDirtyState - Reactive object tracking the dirty state of each field (whether its value has changed from its initial value).
  *   `true` if the field's value has changed. Field names are used as keys.
+ * @property {Object<string, boolean>} formFieldsVisibility - Reactive object tracking the visibility state of each field.
+ *   `true` if visible, `false` if hidden. Field names are used as keys.
  * @property {Function} validateField - Validates a single field's value against its configured rules and updates reactive validation states.
  * @property {Function} validateFormPurely - Validates a provided data object (representing the entire form's current model) against all field configurations.
  *   This is typically used for form submission. Updates reactive validation states.
@@ -69,10 +84,13 @@ export function useFormValidation(fields, options = {}) {
   let formFieldsErrorMessages = reactive({});
   let formFieldsTouchedState = reactive({});
   let formFieldsDirtyState = reactive({});
+  let formFieldsVisibility = reactive({});
   /** @type {Object<string, any>} */
   let initialFormFieldsValues = {}; // Stores initial values for dirty checking
   /** @type {Object<string, number>} */
   const debounceTimers = {}; // Stores setTimeout IDs for debouncing input validation
+  /** @type {Object<string, string[]>} */
+  const fieldDependencies = {}; // Stores which fields depend on others for conditional visibility
 
   /**
    * Gets the display label for a field.
@@ -119,6 +137,7 @@ export function useFormValidation(fields, options = {}) {
     formFieldsDirtyState[fullPath] = false;
     formFieldsValidity[fullPath] = undefined;
     formFieldsErrorMessages[fullPath] = undefined;
+    formFieldsVisibility[fullPath] = true; // Default to visible
   };
 
   /**
@@ -155,9 +174,11 @@ export function useFormValidation(fields, options = {}) {
 
           formFieldsTouchedState[fullPath] = false;
           formFieldsDirtyState[fullPath] = false;
+          formFieldsVisibility[fullPath] = true; // List container itself is visible
 
           currentModelTarget[key].forEach((item, index) => {
             const itemPathPrefix = `${fullPath}[${index}].`;
+            // Initialize visibility for list item fields
             if (typeof item !== "object" || item === null) {
               currentModelTarget[key][index] = {};
             }
@@ -177,6 +198,7 @@ export function useFormValidation(fields, options = {}) {
                     currentModelTarget[key][index],
                     currentInitialValuesTarget[key][index]
                   );
+                  // Visibility for list item fields will be set during overall evaluation
                 }
               });
             }
@@ -189,6 +211,7 @@ export function useFormValidation(fields, options = {}) {
           formFieldsDirtyState[fullPath] = false;
           formFieldsValidity[fullPath] = undefined;
           formFieldsErrorMessages[fullPath] = undefined;
+          formFieldsVisibility[fullPath] = true; // Sub-form container itself is visible
           initFormStates(
             field.fields,
             `${fullPath}.`,
@@ -208,12 +231,26 @@ export function useFormValidation(fields, options = {}) {
           formFieldsDirtyState[fullPath] = false;
           formFieldsValidity[fullPath] = undefined;
           formFieldsErrorMessages[fullPath] = undefined;
+          formFieldsVisibility[fullPath] = true; // Default to visible
+
+          // Register dependencies for conditional fields
+          if (field.condition && Array.isArray(field.condition.rules)) {
+            field.condition.rules.forEach(rule => {
+              if (rule.field) {
+                if (!fieldDependencies[rule.field]) {
+                  fieldDependencies[rule.field] = [];
+                }
+                if (!fieldDependencies[rule.field].includes(fullPath)) {
+                  fieldDependencies[rule.field].push(fullPath);
+                }
+              }
+            });
+          }
         }
       });
     }
   };
 
-  initFormStates(fields);
 
   /**
    * Updates the stored initial value of a field. This is primarily used for dirty state calculation
@@ -222,99 +259,77 @@ export function useFormValidation(fields, options = {}) {
    * @param {any} value - The new initial value for the field.
    */
   const updateFieldInitialValue = (fieldPath, value) => {
-    const fieldConfig = findFieldConfig(fieldPath, fields); // Find the config to ensure we're dealing with a defined field
-    if (fieldConfig && fieldConfig.propertyName) {
-      // Ensure it's a direct field property
+    // This function might need to re-evaluate visibility if initial values change,
+    // but typically initial values are set once.
+    // For now, it primarily affects dirty checking.
+    const fieldConfig = findFieldConfig(fieldPath, fields);
+    if (fieldConfig && (fieldConfig.propertyName || fieldConfig.subForm || fieldConfig.type === 'list')) {
       const serializedValue =
         value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
 
-      // Handle nested paths
-      const pathParts = fieldPath.split(".");
-      let currentTarget = initialFormFieldsValues;
+      setValueByPath(initialFormFieldsValues, fieldPath, serializedValue);
 
-      for (let i = 0; i < pathParts.length - 1; i++) {
-        const part = pathParts[i];
-        if (!currentTarget[part]) {
-          currentTarget[part] = {};
-        }
-        currentTarget = currentTarget[part];
-      }
-
-      const finalKey = pathParts[pathParts.length - 1];
-      currentTarget[finalKey] = serializedValue;
-
-      // If the reactive formFieldsValues was undefined (e.g. field added dynamically or init with no value),
-      // set it and reset dirty state.
-      if (
-        getValueByPath(formFieldsValues, fieldPath) === undefined &&
-        value !== undefined
-      ) {
-        setValueByPath(formFieldsValues, fieldPath, value);
-        formFieldsDirtyState[fieldPath] = false;
+      if (getValueByPath(formFieldsValues, fieldPath) === undefined && value !== undefined) {
+        setValueByPath(formFieldsValues, fieldPath, JSON.parse(JSON.stringify(value))); // Use a copy
+        formFieldsDirtyState[fieldPath] = false; // Reset dirty state as it now matches the new initial value
+      } else {
+        // Re-check dirty state if the field already had a value
+        checkFieldDirty(fieldPath, getValueByPath(formFieldsValues, fieldPath));
       }
     }
   };
 
   /**
    * Helper function to get a value by path from an object.
+   * Handles dot notation for objects and bracket notation for arrays.
    * @private
    * @param {Object} obj - The object to get the value from.
-   * @param {string} path - The path to the value.
-   * @returns {any} The value at the path.
+   * @param {string} path - The path to the value (e.g., 'user.name', 'addresses[0].street').
+   * @returns {any} The value at the path or undefined if not found.
    */
   const getValueByPath = (obj, path) => {
-    return path.split(".").reduce((current, key) => {
-      if (current === null || current === undefined) return undefined;
-
-      // Handle array notation like 'contacts[0]'
-      const arrayMatch = key.match(/^([^[]+)\[(\d+)\]$/);
-      if (arrayMatch) {
-        const [, arrayKey, index] = arrayMatch;
-        return current[arrayKey] && current[arrayKey][parseInt(index)];
-      }
-
-      return current[key];
+    if (!path || typeof path !== 'string') return undefined;
+    // Adjusted to handle paths that might start with an array index if obj is an array itself
+    // and to correctly parse paths like 'list[0].field' vs 'obj.list[0].field'
+    return path.split(/[.[\]]+/).filter(Boolean).reduce((current, key) => {
+        if (current === null || current === undefined) return undefined;
+        if (Array.isArray(current) && /^\d+$/.test(key)) {
+            return current[parseInt(key)];
+        }
+        return typeof current === 'object' ? current[key] : undefined;
     }, obj);
   };
 
+
   /**
    * Helper function to set a value by path in an object.
+   * Handles dot notation for objects and bracket notation for arrays.
    * @private
    * @param {Object} obj - The object to set the value in.
-   * @param {string} path - The path to set the value at.
+   * @param {string} path - The path to set the value at (e.g., 'user.name', 'addresses[0].street').
    * @param {any} value - The value to set.
    */
   const setValueByPath = (obj, path, value) => {
-    const pathParts = path.split(".");
+    if (!path || typeof path !== 'string') return;
+
+    const parts = path.split(/[.[\]]+/).filter(Boolean);
     let current = obj;
 
-    for (let i = 0; i < pathParts.length - 1; i++) {
-      const part = pathParts[i];
+    for (let i = 0; i < parts.length - 1; i++) {
+      const key = parts[i];
+      const nextKey = parts[i+1];
+      const isNextKeyArrayIndex = /^\d+$/.test(nextKey);
 
-      // Handle array notation
-      const arrayMatch = part.match(/^([^[]+)\[(\d+)\]$/);
-      if (arrayMatch) {
-        const [, arrayKey, index] = arrayMatch;
-        if (!current[arrayKey]) current[arrayKey] = [];
-        if (!current[arrayKey][parseInt(index)])
-          current[arrayKey][parseInt(index)] = {};
-        current = current[arrayKey][parseInt(index)];
-      } else {
-        if (!current[part]) current[part] = {};
-        current = current[part];
+      if (current[key] === undefined || current[key] === null) {
+        current[key] = isNextKeyArrayIndex ? [] : {};
       }
+      current = current[key];
     }
-
-    const finalPart = pathParts[pathParts.length - 1];
-    const arrayMatch = finalPart.match(/^([^[]+)\[(\d+)\]$/);
-    if (arrayMatch) {
-      const [, arrayKey, index] = arrayMatch;
-      if (!current[arrayKey]) current[arrayKey] = [];
-      current[arrayKey][parseInt(index)] = value;
-    } else {
-      current[finalPart] = value;
+    if (parts.length > 0) {
+        current[parts[parts.length - 1]] = value;
     }
   };
+
 
   /**
    * Updates the validation state (validity and error message) for a given field.
@@ -339,58 +354,43 @@ export function useFormValidation(fields, options = {}) {
   /**
    * Finds the field configuration for a given field path.
    * @private
-   * @param {string} fieldPath - The path of the field to find.
-   * @param {Array<FieldConfig>} searchFields - The fields to search in.
+   * @param {string} fieldPath - The path of the field to find (e.g., 'user.name', 'addresses[0].street').
+   * @param {Array<FieldConfig>} searchFields - The array of field configurations to search within.
+   * @param {string} [currentPathPrefix=""] - Used internally for recursion to build the full path.
    * @returns {FieldConfig|null} The field configuration or null if not found.
    */
-  const findFieldConfig = (fieldPath, searchFields = fields) => {
+  const findFieldConfig = (fieldPath, searchFields = fields, currentPathPrefix = "") => {
     if (!searchFields || !Array.isArray(searchFields)) return null;
 
-    // Handle nested paths like 'profile.firstName' or 'contacts[0].name'
-    const pathParts = fieldPath.split(".");
-    const firstPart = pathParts[0];
+    for (const field of searchFields) {
+        const key = field.propertyName || field.subForm;
+        if (!key) continue;
 
-    // Check for array notation in the first part
-    const arrayMatch = firstPart.match(/^([^[]+)\[(\d+)\](.*)$/);
-    if (arrayMatch) {
-      const [, listName] = arrayMatch;
-      const listField = searchFields.find(
-        (f) => f.propertyName === listName && f.type === "list"
-      );
-      if (listField && pathParts.length > 1) {
-        // Look for the sub-field in the list's field configuration
-        const subFieldName = pathParts[1];
-        return (
-          listField.fields?.find((f) => f.propertyName === subFieldName) || null
-        );
-      }
-      return listField || null;
+        const fullPath = currentPathPrefix ? `${currentPathPrefix}${key}` : key;
+
+        if (fullPath === fieldPath) {
+            return field;
+        }
+
+        if (field.type === 'list' && fieldPath.startsWith(fullPath + '[')) {
+            // Path is like 'myList[0].subField'
+            // We need to find the config for 'subField' within 'myList.fields'
+            const subPathMatch = fieldPath.match(/^[^.]+\.(.+)$/); // Get 'subField'
+            if (subPathMatch && field.fields) {
+                return findFieldConfig(subPathMatch[1], field.fields); // Search for 'subField' in list item's fields
+            }
+            return field; // Return the list field itself if path is just 'myList[0]'
+        }
+
+        if (field.subForm && field.fields && fieldPath.startsWith(fullPath + '.')) {
+            const remainingPath = fieldPath.substring(fullPath.length + 1);
+            const foundInSubForm = findFieldConfig(remainingPath, field.fields, ""); // No prefix for sub-form's own context
+            if (foundInSubForm) return foundInSubForm;
+        }
     }
-
-    // Handle regular nested paths
-    if (pathParts.length === 1) {
-      // Direct field
-      return (
-        searchFields.find(
-          (f) => f.propertyName === fieldPath || f.subForm === fieldPath
-        ) || null
-      );
-    } else {
-      // Nested field - find the parent first
-      const parentKey = pathParts[0];
-      const parentField = searchFields.find((f) => f.subForm === parentKey);
-      if (parentField && parentField.fields) {
-        const remainingPath = pathParts.slice(1).join(".");
-        // Find the field in the sub-form
-        const subField = parentField.fields.find(
-          (f) => f.propertyName === remainingPath
-        );
-        return subField || null;
-      }
-    }
-
     return null;
   };
+
 
   /**
    * Resets the validation state for a specific field or all fields.
@@ -490,6 +490,12 @@ export function useFormValidation(fields, options = {}) {
       return true; // Assume valid if no config found
     }
 
+    // If field is not visible, it's considered valid (or not applicable for validation)
+    if (formFieldsVisibility[fieldPath] === false) {
+        updateValidationState(fieldPath, true); // Clear any existing errors
+        return true;
+    }
+
     // Validate with custom validators first
     const customResult = validateWithCustomValidator(
       fieldConfig,
@@ -519,32 +525,38 @@ export function useFormValidation(fields, options = {}) {
    * @param {Object} formToValidate - The form data to validate.
    * @param {Array<FieldConfig>} currentFieldsConfig - The current field configurations.
    * @param {string} pathPrefix - The current path prefix for nested structures.
-   * @returns {boolean} True if all fields are valid, false otherwise.
+   * @returns {boolean} True if all VISIBLE fields are valid, false otherwise.
    */
   const validateFormPurelyRecursive = (
     formToValidate,
     currentFieldsConfig,
     pathPrefix = ""
   ) => {
-    if (!currentFieldsConfig || !Array.isArray(currentFieldsConfig))
-      return true;
-
+    if (!currentFieldsConfig || !Array.isArray(currentFieldsConfig)) return true;
     let allValid = true;
 
     currentFieldsConfig.forEach((field) => {
       const key = field.propertyName || field.subForm;
       if (!key) return;
 
+      const fullPath = pathPrefix + key;
+
+      // Skip validation for non-visible fields
+      if (formFieldsVisibility[fullPath] === false && !field.subForm && field.type !== 'list') { // Subforms and lists might have visible children
+        return;
+      }
+
+
       if (field.type === "list") {
-        // Validate list field
-        const listValue = formToValidate[key];
+        const listValue = getValueByPath(formToValidate, key); // Use getValueByPath for consistency
         if (Array.isArray(listValue) && Array.isArray(field.fields)) {
           listValue.forEach((item, index) => {
             if (typeof item === "object" && item !== null) {
               field.fields.forEach((subField) => {
                 if (subField.propertyName) {
-                  const subFieldPath = `${pathPrefix}${key}[${index}].${subField.propertyName}`;
-                  const subFieldValue = item[subField.propertyName];
+                  const subFieldPath = `${fullPath}[${index}].${subField.propertyName}`;
+                  if (formFieldsVisibility[subFieldPath] === false) return; // Skip hidden list item fields
+                  const subFieldValue = getValueByPath(item, subField.propertyName);
                   if (!validateField(subFieldPath, subFieldValue)) {
                     allValid = false;
                   }
@@ -554,24 +566,15 @@ export function useFormValidation(fields, options = {}) {
           });
         }
       } else if (field.subForm && field.fields) {
-        // Validate sub-form
-        const subFormValue = formToValidate[key];
+        const subFormValue = getValueByPath(formToValidate, key);
         if (typeof subFormValue === "object" && subFormValue !== null) {
-          // For sub-forms, we need to validate each field in the sub-form directly
-          field.fields.forEach((subField) => {
-            if (subField.propertyName) {
-              const subFieldPath = `${pathPrefix}${field.subForm}.${subField.propertyName}`;
-              const subFieldValue = subFormValue[subField.propertyName];
-              if (!validateField(subFieldPath, subFieldValue)) {
-                allValid = false;
-              }
-            }
-          });
+           if (!validateFormPurelyRecursive(subFormValue, field.fields, `${fullPath}.`)) {
+             allValid = false;
+           }
         }
       } else if (field.propertyName) {
-        // Validate regular field
-        const fullPath = pathPrefix + field.propertyName;
-        const fieldValue = formToValidate[field.propertyName];
+        // For regular fields, visibility is already checked at the start of the loop for this field.
+        const fieldValue = getValueByPath(formToValidate, field.propertyName); // Access directly from current formToValidate scope
         if (!validateField(fullPath, fieldValue)) {
           allValid = false;
         }
@@ -580,6 +583,7 @@ export function useFormValidation(fields, options = {}) {
 
     return allValid;
   };
+
 
   /**
    * Triggers validation for a specific field based on event type and validation settings.
@@ -596,29 +600,30 @@ export function useFormValidation(fields, options = {}) {
 
     const shouldValidate =
       triggerType === "submit" || // Always validate on submit
-      (validationTrigger === "onBlur" &&
-        (triggerType === "blur" || triggerType === "submit")) ||
-      (validationTrigger === "onInput" &&
-        (triggerType === "input" ||
-          triggerType === "blur" ||
-          triggerType === "submit")) ||
+      (validationTrigger === "onBlur" && (triggerType === "blur" || triggerType === "submit")) ||
+      (validationTrigger === "onInput" && (triggerType === "input" || triggerType === "blur" || triggerType === "submit")) ||
       (validationTrigger === "onSubmit" && triggerType === "submit");
 
     if (!shouldValidate) return;
 
+    const fieldValue = getValueByPath(currentFormModel, fieldPath);
+
     const performValidation = () => {
-      const fieldValue = getValueByPath(currentFormModel, fieldPath);
-      validateField(fieldPath, fieldValue);
+      validateField(fieldPath, fieldValue); // fieldValue captured from outer scope
     };
 
     // Apply debouncing for input events when using onInput trigger
     if (triggerType === "input" && validationTrigger === "onInput") {
-      debounceTimers[fieldPath] = setTimeout(
-        performValidation,
-        inputDebounceMs
-      );
+      debounceTimers[fieldPath] = setTimeout(performValidation, inputDebounceMs);
     } else {
       performValidation();
+    }
+
+    // After validation (or setting value), check for dependent fields and update their visibility
+    if (fieldDependencies[fieldPath]) {
+        fieldDependencies[fieldPath].forEach(dependentFieldPath => {
+            updateFieldVisibility(dependentFieldPath, currentFormModel);
+        });
     }
   };
 
@@ -653,17 +658,17 @@ export function useFormValidation(fields, options = {}) {
    * @returns {boolean} True if the dirty state changed, false otherwise.
    */
   const checkFieldDirty = (fieldPath, currentValue) => {
-    const initialValue = getValueByPath(initialFormFieldsValues, fieldPath);
-    const isDirty =
-      JSON.stringify(currentValue) !== JSON.stringify(initialValue);
-    const currentDirtyState = formFieldsDirtyState[fieldPath];
+    const initialVal = getValueByPath(initialFormFieldsValues, fieldPath);
+    // Ensure consistent comparison, especially for objects/arrays
+    const isDirty = JSON.stringify(currentValue) !== JSON.stringify(initialVal);
 
-    if (currentDirtyState !== isDirty) {
-      formFieldsDirtyState[fieldPath] = isDirty;
-      return true; // State changed
+    if (formFieldsDirtyState[fieldPath] !== isDirty) {
+        formFieldsDirtyState[fieldPath] = isDirty;
+        return true; // State changed
     }
     return false; // State didn't change
   };
+
 
   /**
    * Adds an item to a list field.
@@ -713,21 +718,51 @@ export function useFormValidation(fields, options = {}) {
           formFieldsDirtyState[fieldPath] = false;
           formFieldsValidity[fieldPath] = undefined;
           formFieldsErrorMessages[fieldPath] = undefined;
+          // Visibility will be set by updateFieldVisibility if it's conditional
+          // For now, assume visible unless a condition makes it otherwise.
+          // This requires the global model to be passed or accessible.
+          // For simplicity, new list items are visible by default.
+          // Their conditions will be evaluated if their source dependencies change.
+          formFieldsVisibility[fieldPath] = true;
 
-          // Update initial values
-          if (!initialFormFieldsValues[listFieldPath]) {
-            initialFormFieldsValues[listFieldPath] = [];
+
+          // Update initial values for the new item's fields
+          let listInitialValues = getValueByPath(initialFormFieldsValues, listFieldPath);
+          if (!Array.isArray(listInitialValues)) {
+            listInitialValues = [];
+            setValueByPath(initialFormFieldsValues, listFieldPath, listInitialValues);
           }
-          if (!initialFormFieldsValues[listFieldPath][newIndex]) {
-            initialFormFieldsValues[listFieldPath][newIndex] = {};
+          while (listInitialValues.length <= newIndex) {
+            listInitialValues.push({});
           }
-          initialFormFieldsValues[listFieldPath][newIndex][field.propertyName] =
-            newItem[field.propertyName] !== undefined
-              ? JSON.parse(JSON.stringify(newItem[field.propertyName]))
-              : undefined;
+          setValueByPath(initialFormFieldsValues, `${listFieldPath}[${newIndex}].${field.propertyName}`,
+            newItem[field.propertyName] !== undefined ? JSON.parse(JSON.stringify(newItem[field.propertyName])) : undefined
+          );
+
+          // If the new field has conditions, register its dependencies
+           if (field.condition && Array.isArray(field.condition.rules)) {
+            field.condition.rules.forEach(rule => {
+              if (rule.field) { // rule.field is the source field this new fieldPath depends on
+                // The source field path might be relative or absolute.
+                // For simplicity, assume rule.field is an absolute path for now or relative to form root.
+                // Proper resolution for rule.field within list items (e.g. depending on another field in the SAME item) needs careful path construction.
+                // Example: rule.field = 'myList[INDEX].anotherProperty'
+                // This part needs to be robust if conditions refer to fields within the same list item or other list items.
+                // For now, we assume rule.field is a full path.
+                if (!fieldDependencies[rule.field]) {
+                  fieldDependencies[rule.field] = [];
+                }
+                if (!fieldDependencies[rule.field].includes(fieldPath)) {
+                  fieldDependencies[rule.field].push(fieldPath);
+                }
+              }
+            });
+          }
         }
       });
     }
+    // After adding an item, re-evaluate visibility of fields that might depend on list length or added item values if necessary.
+    // This is complex; for now, direct dependencies on the added item's fields will be handled if those fields change value.
   };
 
   /**
@@ -756,6 +791,17 @@ export function useFormValidation(fields, options = {}) {
           delete formFieldsDirtyState[fieldPath];
           delete formFieldsValidity[fieldPath];
           delete formFieldsErrorMessages[fieldPath];
+          delete formFieldsVisibility[fieldPath]; // Also remove visibility state
+
+          // Clean up dependencies: if this field was a dependent, remove it
+          Object.keys(fieldDependencies).forEach(sourceField => {
+            const indexToRemove = fieldDependencies[sourceField].indexOf(fieldPath);
+            if (indexToRemove > -1) {
+              fieldDependencies[sourceField].splice(indexToRemove, 1);
+            }
+          });
+          // If this field was a source for other dependencies (unlikely for list item fields themselves, but good practice)
+          // delete fieldDependencies[fieldPath]; // This would be if fieldPath itself was a key in fieldDependencies
         }
       });
     }
@@ -805,11 +851,227 @@ export function useFormValidation(fields, options = {}) {
                 formFieldsErrorMessages[oldFieldPath];
               delete formFieldsErrorMessages[oldFieldPath];
             }
+            if (formFieldsVisibility[oldFieldPath] !== undefined) {
+                formFieldsVisibility[newFieldPath] = formFieldsVisibility[oldFieldPath];
+                delete formFieldsVisibility[oldFieldPath];
+            }
+
+            // Update dependencies map if this fieldPath was part of any dependency rule
+            // This is tricky because the field path itself changes.
+            // It's often simpler to rebuild dependencies or ensure robust path matching.
+            // For now, we assume direct path matches in fieldDependencies keys and values.
+            // If oldFieldPath was a dependent:
+            Object.keys(fieldDependencies).forEach(sourceField => {
+                const depIndex = fieldDependencies[sourceField].indexOf(oldFieldPath);
+                if (depIndex > -1) {
+                    fieldDependencies[sourceField][depIndex] = newFieldPath; // Update to new path
+                }
+            });
+            // If oldFieldPath was a source dependency (less common for list item fields):
+            if (fieldDependencies[oldFieldPath]) {
+                fieldDependencies[newFieldPath] = fieldDependencies[oldFieldPath];
+                delete fieldDependencies[oldFieldPath];
+            }
+
           }
         });
       });
     }
   };
+
+  // --- Conditional Logic Implementation ---
+
+  /**
+   * Evaluates a single condition rule.
+   * @private
+   * @param {ConditionRule} rule - The condition rule to evaluate.
+   * @param {any} sourceValue - The value of the source field defined in rule.field.
+   * @returns {boolean} True if the rule is met, false otherwise.
+   */
+  const evaluateConditionRule = (rule, sourceValue) => {
+    const targetValue = rule.value;
+    switch (rule.operator) {
+      case 'equals': return sourceValue === targetValue;
+      case 'notEquals': return sourceValue !== targetValue;
+      case 'in':
+        if (Array.isArray(targetValue)) return targetValue.includes(sourceValue);
+        if (typeof targetValue === 'string') return targetValue.split(',').map(s => s.trim()).includes(String(sourceValue));
+        return false;
+      case 'notIn':
+        if (Array.isArray(targetValue)) return !targetValue.includes(sourceValue);
+        if (typeof targetValue === 'string') return !targetValue.split(',').map(s => s.trim()).includes(String(sourceValue));
+        return true;
+      case 'greaterThan': return sourceValue > targetValue;
+      case 'lessThan': return sourceValue < targetValue;
+      case 'greaterThanOrEquals': return sourceValue >= targetValue;
+      case 'lessThanOrEquals': return sourceValue <= targetValue;
+      case 'defined': return sourceValue !== undefined && sourceValue !== null;
+      case 'undefined': return sourceValue === undefined || sourceValue === null;
+      case 'matchesRegex':
+        try {
+          return new RegExp(targetValue).test(String(sourceValue));
+        } catch (e) {
+          console.error("Invalid regex in condition:", targetValue, e);
+          return false;
+        }
+      default: return false;
+    }
+  };
+
+  /**
+   * Evaluates the visibility of a field based on its conditions.
+   * @private
+   * @param {string} fieldPathToEvaluate - The path of the field whose visibility is being determined.
+   * @param {Object} currentFormModel - The current state of the entire form model.
+   * @returns {boolean} True if the field should be visible, false otherwise.
+   */
+  const evaluateFieldVisibility = (fieldPathToEvaluate, currentFormModel) => {
+    const fieldConfig = findFieldConfig(fieldPathToEvaluate, fields);
+    if (!fieldConfig || !fieldConfig.condition || !Array.isArray(fieldConfig.condition.rules) || fieldConfig.condition.rules.length === 0) {
+      return true; // No conditions, so visible by default
+    }
+
+    const { rules, logic = 'AND' } = fieldConfig.condition;
+    let overallResult = logic === 'AND';
+
+    for (const rule of rules) {
+      // Resolve source field path: could be relative to a list item or absolute.
+      // This is a complex part. For now, assume rule.field is resolvable from the root model.
+      // True robust relative path resolution (e.g., '../../otherField' or 'currentItem.anotherProp')
+      // would require passing more context or a more sophisticated path resolution mechanism.
+      const sourceValue = getValueByPath(currentFormModel, rule.field);
+      const ruleResult = evaluateConditionRule(rule, sourceValue);
+
+      if (logic === 'AND') {
+        if (!ruleResult) {
+          overallResult = false;
+          break;
+        }
+      } else { // OR logic
+        if (ruleResult) {
+          overallResult = true;
+          break;
+        }
+      }
+    }
+    return overallResult;
+  };
+
+
+  /**
+   * Updates the visibility state of a field and handles side effects (validation reset, value clearing).
+   * @private
+   * @param {string} fieldPath - The path of the field to update.
+   * @param {Object} currentFormModel - The current form model.
+   */
+  const updateFieldVisibility = (fieldPath, currentFormModel) => {
+    const fieldConfig = findFieldConfig(fieldPath, fields);
+    if (!fieldConfig) return;
+
+    const oldVisibility = formFieldsVisibility[fieldPath];
+    const newVisibility = evaluateFieldVisibility(fieldPath, currentFormModel);
+
+    if (oldVisibility === newVisibility) return; // No change
+
+    formFieldsVisibility[fieldPath] = newVisibility;
+
+    if (!newVisibility) { // Field becomes hidden
+      resetValidationState(fieldPath); // Clear validation errors and status
+
+      if (fieldConfig.clearValueOnHide) {
+        // Determine appropriate empty/initial value
+        let resetValue = undefined;
+        if (fieldConfig.type === 'list') resetValue = [];
+        else if (fieldConfig.fields) resetValue = {}; // for sub-forms
+        else if (fieldConfig.hasOwnProperty('value')) resetValue = JSON.parse(JSON.stringify(fieldConfig.value)); // initial value from config
+
+        setValueByPath(formFieldsValues, fieldPath, resetValue); // Update internal model
+        // Note: Propagating this change to the parent component's v-model is complex.
+        // PreskoForm would need to watch formFieldsValues or receive events.
+        // For now, the internal model is updated. External sync is a larger architectural concern.
+        // Re-check dirty state after clearing value
+        checkFieldDirty(fieldPath, resetValue);
+      }
+      // If this hidden field itself is a dependency for others, they might need re-evaluation.
+      // This creates a potential cascade. The current dependency tracking (source changes -> dependent updates)
+      // should handle this if the hidden field's value change (due to clearValueOnHide) triggers further updates.
+      // If clearValueOnHide is false, the value remains, so dependent fields shouldn't change based on this event alone.
+
+    } else { // Field becomes visible
+      // If field becomes visible, its current value is retained.
+      // Validation might be triggered depending on form settings (e.g., validate on change/blur)
+      // but this function itself doesn't trigger validation directly.
+      // The user interaction or a subsequent validation pass would catch it.
+    }
+
+    // If the visibility of this field (fieldPath) changed, and *other* fields depend on *its* value (fieldPath is a source dependency)
+    // then those other fields visibility should be re-evaluated.
+    // This is handled by the watchEffect on formFieldsValues or when triggerValidation is called.
+    // However, if `clearValueOnHide` changed its value, that change should trigger updates for its dependents.
+    if (fieldDependencies[fieldPath]) {
+        fieldDependencies[fieldPath].forEach(dependentFieldPath => {
+            if (dependentFieldPath !== fieldPath) { // Avoid self-recursion if a field somehow depends on itself
+                 updateFieldVisibility(dependentFieldPath, currentFormModel);
+            }
+        });
+    }
+  };
+
+  // Initialize all field visibilities after states and dependencies are built
+  const initializeAllVisibilities = (currentFields, pathPrefix = "", model) => {
+    currentFields.forEach(field => {
+      const key = field.propertyName || field.subForm;
+      if (!key) return;
+      const fullPath = pathPrefix + key;
+
+      if (field.condition) {
+        updateFieldVisibility(fullPath, model);
+      }
+
+      if (field.subForm && field.fields) {
+        const subModel = getValueByPath(model, key) || {};
+        initializeAllVisibilities(field.fields, `${fullPath}.`, subModel);
+      } else if (field.type === 'list' && field.fields) {
+        const listItems = getValueByPath(model, key) || [];
+        listItems.forEach((item, index) => {
+          const itemPathPrefix = `${fullPath}[${index}].`;
+          const itemModel = item || {};
+          initializeAllVisibilities(field.fields, itemPathPrefix, itemModel); // Pass item as model for its fields
+        });
+      }
+    });
+  };
+
+  // Initial setup
+  initFormStates(fields); // Sets up states, including default visibility and dependency map
+  // Use a deep copy of initialFormFieldsValues for the first visibility evaluation,
+  // as formFieldsValues might not be fully populated if parent provides model later.
+  initializeAllVisibilities(fields, "", JSON.parse(JSON.stringify(initialFormFieldsValues)));
+
+
+  // Watch for changes in any field value that is a source dependency
+  // This is a simplified approach. A more granular watch on specific formFieldsValues paths
+  // or integrating with how `triggerValidation` gets currentFormModel would be more robust.
+  // This requires `formFieldsValues` to be accurately reflecting the overall form model.
+  // In PreskoForm, the true model is often managed by the parent component via v-model.
+  // This watch assumes `formFieldsValues` is kept in sync or is the source of truth.
+
+  // This watch might be too broad. Consider making it more specific or integrating updates
+  // into where field values are known to change (e.g., after `triggerValidation` or direct `formFieldsValues` mutation).
+  watch(formFieldsValues, (newModel, oldModel) => {
+    // Iterate over all source fields in the dependency map
+    Object.keys(fieldDependencies).forEach(sourceFieldPath => {
+        const newValue = getValueByPath(newModel, sourceFieldPath);
+        const oldValue = getValueByPath(oldModel, sourceFieldPath);
+
+        if (JSON.stringify(newValue) !== JSON.stringify(oldValue)) { // Basic change detection
+            fieldDependencies[sourceFieldPath].forEach(dependentFieldPath => {
+                updateFieldVisibility(dependentFieldPath, newModel);
+            });
+        }
+    });
+  }, { deep: true });
+
 
   return {
     formFieldsValues,
@@ -817,6 +1079,7 @@ export function useFormValidation(fields, options = {}) {
     formFieldsErrorMessages,
     formFieldsTouchedState,
     formFieldsDirtyState,
+    formFieldsVisibility, // Expose visibility state
     validateField,
     validateFormPurely,
     setFieldTouched,
@@ -826,5 +1089,6 @@ export function useFormValidation(fields, options = {}) {
     resetValidationState,
     addItem,
     removeItem,
+    // Potentially expose evaluateFieldVisibility or updateFieldVisibility if external manual control is needed
   };
 }

@@ -22,7 +22,7 @@
             <!-- Sub-Form Rendering -->
             <!-- Corrected ref handling for arrays -->
             <PreskoForm
-              v-if="field.subForm"
+              v-if="field.subForm && formFieldsVisibility && formFieldsVisibility[field.subForm]"
               :ref="(el) => el && subFormRefs.push(el)"
               v-model="modelValue[field.subForm]"
               :fields="field.fields"
@@ -47,7 +47,7 @@
               @submit:reject="handleSubFormSubmitReject"
             ></PreskoForm>
             <!-- List Field Rendering -->
-            <div v-else-if="field.type === 'list'" class="presko-list-field">
+            <div v-else-if="field.type === 'list' && formFieldsVisibility && formFieldsVisibility[field.propertyName]" class="presko-list-field">
               <div class="presko-list-field-header">
                 <label>{{ field.label || field.propertyName }}</label>
                 <button
@@ -65,51 +65,52 @@
                 class="presko-list-item"
               >
                 <div class="presko-list-item-fields">
-                  <PreskoFormItem
-                    v-for="listItemField in field.fields"
-                    :key="listItemField.propertyName"
-                    :modelValue="item[listItemField.propertyName]"
-                    @update:modelValue="
-                      (value) =>
-                        handleListItemFieldModelUpdate(
-                          field.propertyName,
-                          index,
-                          listItemField.propertyName,
-                          value
-                        )
-                    "
-                    :field="listItemField"
-                    :error-props="props.errorProps"
-                    :isTouched="
-                      formFieldsTouchedState[
-                        `${field.propertyName}[${index}].${listItemField.propertyName}`
-                      ] || false
-                    "
-                    :isDirty="
-                      formFieldsDirtyState[
-                        `${field.propertyName}[${index}].${listItemField.propertyName}`
-                      ] || false
-                    "
-                    :fieldStateProps="props.fieldStateProps"
-                    :validity-state="{
-                      hasErrors:
-                        formFieldsValidity[
+                  <template v-for="listItemField in field.fields" :key="listItemField.propertyName">
+                    <PreskoFormItem
+                      v-if="formFieldsVisibility && formFieldsVisibility[`${field.propertyName}[${index}].${listItemField.propertyName}`]"
+                      :modelValue="item[listItemField.propertyName]"
+                      @update:modelValue="
+                        (value) =>
+                          handleListItemFieldModelUpdate(
+                            field.propertyName,
+                            index,
+                            listItemField.propertyName,
+                            value
+                          )
+                      "
+                      :field="listItemField"
+                      :error-props="props.errorProps"
+                      :isTouched="
+                        formFieldsTouchedState[
                           `${field.propertyName}[${index}].${listItemField.propertyName}`
-                        ] === false,
-                      errMsg:
-                        formFieldsErrorMessages[
+                        ] || false
+                      "
+                      :isDirty="
+                        formFieldsDirtyState[
                           `${field.propertyName}[${index}].${listItemField.propertyName}`
-                        ],
-                    }"
-                    @field-blurred="
-                      () =>
-                        handleListItemFieldBlurred(
-                          field.propertyName,
-                          index,
-                          listItemField.propertyName
-                        )
-                    "
-                  ></PreskoFormItem>
+                        ] || false
+                      "
+                      :fieldStateProps="props.fieldStateProps"
+                      :validity-state="{
+                        hasErrors:
+                          formFieldsValidity[
+                            `${field.propertyName}[${index}].${listItemField.propertyName}`
+                          ] === false,
+                        errMsg:
+                          formFieldsErrorMessages[
+                            `${field.propertyName}[${index}].${listItemField.propertyName}`
+                          ],
+                      }"
+                      @field-blurred="
+                        () =>
+                          handleListItemFieldBlurred(
+                            field.propertyName,
+                            index,
+                            listItemField.propertyName
+                          )
+                      "
+                    ></PreskoFormItem>
+                  </template>
                 </div>
                 <button
                   type="button"
@@ -122,7 +123,7 @@
             </div>
             <!-- Regular Field Rendering -->
             <PreskoFormItem
-              v-else-if="field.propertyName"
+              v-else-if="field.propertyName && formFieldsVisibility && formFieldsVisibility[field.propertyName]"
               :modelValue="modelValue[field.propertyName]"
               @update:modelValue="
                 (value) => handleFieldModelUpdate(field.propertyName, value)
@@ -395,6 +396,7 @@ const {
   validateFormPurely,
   formFieldsTouchedState,
   formFieldsDirtyState,
+  formFieldsVisibility, // <-- Add this
   setFieldTouched,
   checkFieldDirty,
   updateFieldInitialValue,

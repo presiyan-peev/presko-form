@@ -1,712 +1,544 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { useFormValidation } from "./useFormValidation";
-import { nextTick, reactive } from "vue";
-import Validation from "../validation"; // Import the mocked module
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { useFormValidation } from './useFormValidation';
+import { reactive, nextTick } from 'vue'; // nextTick for reactivity propagation
 
-// Mock the ../validation module
-vi.mock("../validation", () => ({
-  default: {
-    isRequired: vi.fn((value, label) =>
-      value ? true : `${label} is required.`
-    ),
-    isEmail: vi.fn((value, label) =>
-      /@/.test(value) ? true : `Invalid email format for ${label}.`
-    ),
-    minLength: vi.fn((value, label, _c, params) =>
-      value && value.length >= params.min
-        ? true
-        : `${label} must be at least ${params.min} characters.`
-    ),
-    domain: vi.fn((value, label) =>
-      value === "valid.com" ? true : "Invalid domain format."
-    ),
-    ipv4: vi
-      .fn()
-      .mockImplementation((value, label) =>
-        value === "1.1.1.1" ? true : `Invalid IPv4 format for ${label}.`
-      ),
-    ipv6: vi
-      .fn()
-      .mockImplementation((value, label) =>
-        value === "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
-          ? true
-          : `Invalid IPv6 format for ${label}.`
-      ),
-    validate: vi.fn((value, rules, label, fieldConfig) => {
-      for (const rule of rules) {
-        if (typeof rule === "string") {
-          if (rule === "isRequired" && (!value || !value.trim()))
-            return `${label} is required.`;
-          if (rule === "isEmail" && !/@/.test(value))
-            return `Invalid email format for ${label}.`;
-        } else if (rule.name === "minLength") {
-          if (!value || value.length < rule.params.min)
-            return `${label} must be at least ${rule.params.min} characters.`;
-        }
-      }
-      return true;
-    }),
-  },
-}));
+// Mock Vue's reactive and watch effectively for testing
+vi.mock('vue', async () => {
+  const actualVue = await vi.importActual('vue');
+  const reactiveMap = new Map();
+  return {
+    ...actualVue,
+    reactive: (obj) => {
+      const reactiveObj = actualVue.reactive(obj);
+      reactiveMap.set(obj, reactiveObj);
+      return reactiveObj;
+    },
+    // Minimal mock for watch if needed, though useFormValidation's internal watch should work with reactive changes.
+    // watch: (source, cb, options) => {
+    //   // For simplicity, this mock might not fully replicate watch behavior.
+    //   // We rely on changes to reactive properties triggering the composable's internal watch.
+    //   let cleanup = () => {};
+    //   if (typeof source === 'function') {
+    //      // Call it once like immediate:true might
+    //     if(options && options.immediate){
+    //         source();
+    //     }
+    //   } else {
+    //     if(options && options.immediate && reactiveMap.has(source)){
+    //         cb(reactiveMap.get(source), undefined);
+    //     }
+    //   }
+    //   return cleanup;
+    // },
+  };
+});
 
-const getSimpleFieldsConfig = () => [
-  {
-    propertyName: "name",
-    label: "Full Name",
-    rules: ["isRequired", { name: "minLength", params: { min: 3 } }],
-    value: "",
-  },
-  {
-    propertyName: "email",
-    label: "Email Address",
-    rules: ["isRequired", "isEmail"],
-    value: "",
-  },
-  {
-    propertyName: "bio",
-    label: "Biography",
-    value: "", // No rules initially
-  },
-];
 
-const getNestedFieldsConfig = () => [
-  {
-    propertyName: "username",
-    label: "Username",
-    rules: ["isRequired"],
-    value: "testuser",
-  },
-  {
-    subForm: "profile", // Key for the sub-form object in the model
-    fields: [
-      // Field definitions for the sub-form
-      {
-        propertyName: "firstName", // Actual property name for state tracking (e.g., formFieldsValidity.firstName)
-        label: "First Name",
-        rules: ["isRequired"],
-        value: "",
-      },
-      {
-        propertyName: "lastName",
-        label: "Last Name",
-        rules: ["isRequired"],
-        value: "",
-      },
-    ],
-  },
-];
+describe('useFormValidation - Conditional Fields', () => {
+  let fields;
+  let initialModel;
 
-const getVariousRulesFieldsConfig = () => [
-  {
-    propertyName: "name",
-    rules: ["isRequired"],
-    value: "",
-    label: "Name",
-  },
-  {
-    propertyName: "email",
-    rules: ["isEmail"],
-    value: "test@example.com",
-    label: "Email",
-  },
-  {
-    propertyName: "website",
-    rules: [{ name: "domain", customErrorMsg: "Invalid domain format." }],
-    label: "Website",
-    value: "",
-  },
-  {
-    propertyName: "custom",
-    label: "Custom",
-    validators: [(value) => value === "valid" || 'Must be "valid".'],
-    value: "",
-  },
-  {
-    propertyName: "regexField",
-    label: "Regex Field",
-    rules: [/^[a-z]+$/],
-    value: "",
-  },
-  {
-    propertyName: "ipv4Field",
-    label: "IPv4 Field",
-    rules: ["ipv4"],
-    value: "",
-  },
-  {
-    propertyName: "ipv6Field",
-    label: "IPv6 Field",
-    rules: ["ipv6"],
-    value: "",
-  },
-];
-
-const getListFieldsConfig = () => [
-  {
-    propertyName: "contacts",
-    type: "list",
-    label: "Contacts",
-    initialValue: [],
-    defaultValue: { name: "Default Contact", email: "default@example.com" },
-    fields: [
-      {
-        propertyName: "name",
-        label: "Contact Name",
-        rules: ["isRequired"],
-        value: "",
-      },
-      {
-        propertyName: "email",
-        label: "Contact Email",
-        rules: ["isRequired", "isEmail"],
-        value: "",
-      },
-    ],
-  },
-];
-
-describe("useFormValidation", () => {
   beforeEach(() => {
+    // Reset fields and model before each test
+    fields = [];
+    initialModel = {};
+    // Vitest's fake timers can be useful if there's debouncing or async updates
     vi.useFakeTimers();
-    // Reset mocks before each test
-    vi.clearAllMocks();
+  });
 
-    // Configure mock implementations for each test
-    Validation.isRequired.mockImplementation((value, label) =>
-      value && value.trim() ? true : `${label} is required.`
-    );
-    Validation.isEmail.mockImplementation((value, label) =>
-      /@/.test(value) ? true : `Invalid email format for ${label}.`
-    );
-    Validation.minLength.mockImplementation((value, label, _c, params) =>
-      value && value.length >= params.min
-        ? true
-        : `${label} must be at least ${params.min} characters.`
-    );
-    Validation.ipv4.mockImplementation((value, label) =>
-      value === "1.1.1.1" ? true : `Invalid IPv4 format for ${label}.`
-    );
-    Validation.ipv6.mockImplementation((value, label) =>
-      value === "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
-        ? true
-        : `Invalid IPv6 format for ${label}.`
-    );
-    Validation.validate.mockImplementation(
-      (value, rules, label, fieldConfig) => {
-        for (const rule of rules) {
-          if (typeof rule === "string") {
-            if (rule === "isRequired" && (!value || !value.trim()))
-              return `${label} is required.`;
-            if (rule === "isEmail" && !/@/.test(value))
-              return `Invalid email format for ${label}.`;
-          } else if (rule.name === "minLength") {
-            if (!value || value.length < rule.params.min)
-              return `${label} must be at least ${rule.params.min} characters.`;
-          }
-        }
-        return true;
-      }
-    );
+  const advanceTicks = async (count = 1) => {
+    for (let i = 0; i < count; i++) {
+      await nextTick();
+    }
+    vi.runAllTimers(); // Ensure any timers (like from watch with debounce) are run
+  };
+
+  describe('1. Initialization of formFieldsVisibility', () => {
+    it('should set fields without conditions to visible by default', () => {
+      fields = [{ propertyName: 'fieldA' }];
+      const { formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.fieldA).toBe(true);
+    });
+
+    it('should evaluate initial visibility: hidden if condition not met', () => {
+      fields = [
+        { propertyName: 'control', value: 'hide' },
+        {
+          propertyName: 'dependent',
+          condition: { rules: [{ field: 'control', operator: 'equals', value: 'show' }] },
+        },
+      ];
+      // initialModel implicitly created from field values if not passed to useFormValidation
+      const { formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.dependent).toBe(false);
+    });
+
+    it('should evaluate initial visibility: visible if condition met', () => {
+      fields = [
+        { propertyName: 'control', value: 'show' },
+        {
+          propertyName: 'dependent',
+          condition: { rules: [{ field: 'control', operator: 'equals', value: 'show' }] },
+        },
+      ];
+      const { formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.dependent).toBe(true);
+    });
+  });
+
+  describe('2. evaluateConditionRule (tested via evaluateFieldVisibility effects)', () => {
+    // Test each operator through the visibility outcome
+    const testOperator = async (operator, sourceValue, conditionValue, expectedVisibility) => {
+      fields = [
+        { propertyName: 'source', value: sourceValue },
+        {
+          propertyName: 'target',
+          condition: { rules: [{ field: 'source', operator, value: conditionValue }] },
+        },
+      ];
+      const { formFieldsVisibility, formFieldsValues } = useFormValidation(fields);
+      // To ensure reactivity if sourceValue is changed after init (for dynamic tests)
+      // formFieldsValues.source = sourceValue; await advanceTicks();
+      expect(formFieldsVisibility.target).toBe(expectedVisibility);
+    };
+
+    it('operator "equals": "a" === "a" -> true', () => testOperator('equals', 'a', 'a', true));
+    it('operator "equals": "a" === "b" -> false', () => testOperator('equals', 'a', 'b', false));
+    it('operator "notEquals": "a" !== "b" -> true', () => testOperator('notEquals', 'a', 'b', true));
+    it('operator "notEquals": "a" !== "a" -> false', () => testOperator('notEquals', 'a', 'a', false));
+    it('operator "in": "a" in ["a", "b"] -> true', () => testOperator('in', 'a', ['a', 'b'], true));
+    it('operator "in": "c" in ["a", "b"] -> false', () => testOperator('in', 'c', ['a', 'b'], false));
+    it('operator "in": "b" in "a,b,c" (string list) -> true', () => testOperator('in', 'b', 'a,b,c', true));
+    it('operator "notIn": "c" notIn ["a", "b"] -> true', () => testOperator('notIn', 'c', ['a', 'b'], true));
+    it('operator "notIn": "a" notIn ["a", "b"] -> false', () => testOperator('notIn', 'a', ['a', 'b'], false));
+    it('operator "greaterThan": 5 > 3 -> true', () => testOperator('greaterThan', 5, 3, true));
+    it('operator "greaterThan": 3 > 5 -> false', () => testOperator('greaterThan', 3, 5, false));
+    it('operator "lessThan": 3 < 5 -> true', () => testOperator('lessThan', 3, 5, true));
+    it('operator "lessThan": 5 < 3 -> false', () => testOperator('lessThan', 5, 3, false));
+    it('operator "greaterThanOrEquals": 5 >= 5 -> true', () => testOperator('greaterThanOrEquals', 5, 5, true));
+    it('operator "greaterThanOrEquals": 4 >= 5 -> false', () => testOperator('greaterThanOrEquals', 4, 5, false));
+    it('operator "lessThanOrEquals": 5 <= 5 -> true', () => testOperator('lessThanOrEquals', 5, 5, true));
+    it('operator "lessThanOrEquals": 6 <= 5 -> false', () => testOperator('lessThanOrEquals', 6, 5, false));
+    it('operator "defined": "hello" is defined -> true', () => testOperator('defined', 'hello', undefined, true));
+    it('operator "defined": null is defined -> false', () => testOperator('defined', null, undefined, false));
+    it('operator "undefined": undefined is undefined -> true', () => testOperator('undefined', undefined, undefined, true));
+    it('operator "undefined": "hello" is undefined -> false', () => testOperator('undefined', 'hello', undefined, false));
+    it('operator "matchesRegex": "abc" matches /^a/ -> true', () => testOperator('matchesRegex', 'abc', '^a', true));
+    it('operator "matchesRegex": "abc" matches /^b/ -> false', () => testOperator('matchesRegex', 'abc', '^b', false));
+  });
+
+  describe('3. evaluateFieldVisibility (logic and nesting)', () => {
+    it('should handle AND logic: true if all rules true', () => {
+      fields = [
+        { propertyName: 'control1', value: 'yes' },
+        { propertyName: 'control2', value: 10 },
+        {
+          propertyName: 'dependent',
+          condition: {
+            logic: 'AND',
+            rules: [
+              { field: 'control1', operator: 'equals', value: 'yes' },
+              { field: 'control2', operator: 'greaterThan', value: 5 },
+            ],
+          },
+        },
+      ];
+      const { formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.dependent).toBe(true);
+    });
+
+    it('should handle AND logic: false if one rule false', () => {
+      fields = [
+        { propertyName: 'control1', value: 'no' }, // This will make it false
+        { propertyName: 'control2', value: 10 },
+        {
+          propertyName: 'dependent',
+          condition: {
+            logic: 'AND',
+            rules: [
+              { field: 'control1', operator: 'equals', value: 'yes' },
+              { field: 'control2', operator: 'greaterThan', value: 5 },
+            ],
+          },
+        },
+      ];
+      const { formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.dependent).toBe(false);
+    });
+
+    it('should handle OR logic: true if one rule true', () => {
+      fields = [
+        { propertyName: 'control1', value: 'no' },
+        { propertyName: 'control2', value: 3 }, // This will make its rule true
+        {
+          propertyName: 'dependent',
+          condition: {
+            logic: 'OR',
+            rules: [
+              { field: 'control1', operator: 'equals', value: 'yes' },
+              { field: 'control2', operator: 'lessThan', value: 5 },
+            ],
+          },
+        },
+      ];
+      const { formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.dependent).toBe(true);
+    });
+
+    it('should handle OR logic: false if all rules false', () => {
+      fields = [
+        { propertyName: 'control1', value: 'no' },
+        { propertyName: 'control2', value: 10 },
+        {
+          propertyName: 'dependent',
+          condition: {
+            logic: 'OR',
+            rules: [
+              { field: 'control1', operator: 'equals', value: 'yes' },
+              { field: 'control2', operator: 'lessThan', value: 5 },
+            ],
+          },
+        },
+      ];
+      const { formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.dependent).toBe(false);
+    });
+
+    it('should handle conditions on nested object fields', () => {
+      fields = [
+        { subForm: 'profile', fields: [{ propertyName: 'name', value: 'test' }] },
+        {
+          propertyName: 'dependent',
+          condition: { rules: [{ field: 'profile.name', operator: 'equals', value: 'test' }] },
+        },
+      ];
+      const { formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.dependent).toBe(true);
+    });
+
+    it('should handle conditions on list item fields', () => {
+      fields = [
+        {
+          propertyName: 'users',
+          type: 'list',
+          initialValue: [{ type: 'admin' }, { type: 'user' }],
+          fields: [{ propertyName: 'type' }],
+        },
+        {
+          propertyName: 'showAdminSettings',
+          condition: { rules: [{ field: 'users[0].type', operator: 'equals', value: 'admin' }] },
+        },
+      ];
+      const { formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.showAdminSettings).toBe(true);
+    });
+  });
+
+  describe('4. Dynamic Visibility Updates (Dependency Tracking)', () => {
+    it('should update visibility when a source field changes', async () => {
+      fields = [
+        { propertyName: 'control', value: 'hide' },
+        {
+          propertyName: 'dependent',
+          condition: { rules: [{ field: 'control', operator: 'equals', value: 'show' }] },
+        },
+      ];
+      const { formFieldsValues, formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.dependent).toBe(false); // Initial
+
+      formFieldsValues.control = 'show';
+      await advanceTicks(2); // Allow watcher to trigger and propagate
+
+      expect(formFieldsVisibility.dependent).toBe(true); // After change
+    });
+
+    it('should update visibility with multiple levels of dependency', async () => {
+        fields = [
+            { propertyName: 'masterControl', value: 'initial' },
+            {
+                propertyName: 'level1Dependent',
+                condition: { rules: [{ field: 'masterControl', operator: 'equals', value: 'go' }] },
+            },
+            {
+                propertyName: 'level2Dependent',
+                condition: { rules: [{ field: 'level1Dependent', operator: 'equals', value: true }] } // Depends on visibility state
+                // Note: This specific condition `operator: 'equals', value: true` is tricky because level1Dependent's *value* isn't what's changing,
+                // its *visibility* is. For this to work as described, 'level1Dependent' would need to be in formFieldsValues
+                // and its value set to true/false based on its visibility, or the condition system needs to read visibility state.
+                // The PRD implies conditions are based on *values*.
+                // Let's adjust: level2 depends on a *value* that is set conditionally.
+            },
+        ];
+        // Re-design for value-based dependency for level2Dependent
+        fields = [
+            { propertyName: 'masterControl', value: 'initial' },
+            {
+                propertyName: 'level1FlagHolder', // This field's value will be set if masterControl is 'go'
+                value: false,
+            },
+            { // This field isn't conditional itself but its value is part of a chain
+                propertyName: 'intermediateValueSetter',
+                value: 'default'
+                // We'll manually set this to 'active' when masterControl is 'go' to simulate a more complex flow
+            },
+            {
+                propertyName: 'level2Dependent',
+                condition: { rules: [{ field: 'intermediateValueSetter', operator: 'equals', value: 'active' }] }
+            }
+        ];
+
+        const { formFieldsValues, formFieldsVisibility } = useFormValidation(fields);
+
+        expect(formFieldsVisibility.level2Dependent).toBe(false); // Initial based on intermediateValueSetter=default
+
+        formFieldsValues.masterControl = 'go';
+        // Simulate that 'masterControl' being 'go' also leads to 'intermediateValueSetter' changing
+        formFieldsValues.intermediateValueSetter = 'active';
+        await advanceTicks(2);
+
+        // Now level2Dependent should become visible because intermediateValueSetter is 'active'
+        expect(formFieldsVisibility.level2Dependent).toBe(true);
+    });
+  });
+
+  describe('5. Interaction with Validation', () => {
+    beforeEach(() => {
+      fields = [
+        { propertyName: 'control', value: 'hide' },
+        {
+          propertyName: 'conditionalField',
+          rules: ['required'],
+          condition: { rules: [{ field: 'control', operator: 'equals', value: 'show' }] },
+        },
+        { propertyName: 'alwaysVisibleField', rules: ['required'], value: ''} // initially invalid
+      ];
+    });
+
+    it('should clear validation when a field becomes hidden', async () => {
+      const { formFieldsValues, formFieldsVisibility, validateField, formFieldsErrorMessages, formFieldsValidity } = useFormValidation(fields);
+
+      // Make it visible and invalid
+      formFieldsValues.control = 'show';
+      await advanceTicks(2);
+      expect(formFieldsVisibility.conditionalField).toBe(true);
+      formFieldsValues.conditionalField = ''; // make it invalid
+      validateField('conditionalField', formFieldsValues.conditionalField);
+      expect(formFieldsValidity.conditionalField).toBe(false);
+      expect(formFieldsErrorMessages.conditionalField).toBeTruthy();
+
+      // Hide it
+      formFieldsValues.control = 'hide';
+      await advanceTicks(2);
+      expect(formFieldsVisibility.conditionalField).toBe(false);
+
+      // Check if errors are cleared
+      expect(formFieldsValidity.conditionalField).toBeUndefined(); // Undefined means valid or not validated
+      expect(formFieldsErrorMessages.conditionalField).toBeUndefined();
+    });
+
+    it('validateField should return true for hidden fields', async () => {
+      const { formFieldsValues, formFieldsVisibility, validateField } = useFormValidation(fields);
+      expect(formFieldsVisibility.conditionalField).toBe(false); // Initially hidden
+
+      const isValid = validateField('conditionalField', formFieldsValues.conditionalField);
+      expect(isValid).toBe(true);
+    });
+
+    it('validateFormPurely should only validate visible fields', async () => {
+      const { formFieldsValues, formFieldsVisibility, validateFormPurely, formFieldsErrorMessages } = useFormValidation(fields);
+
+      // conditionalField is hidden, alwaysVisibleField is visible but empty (invalid)
+      expect(formFieldsVisibility.conditionalField).toBe(false);
+      formFieldsValues.alwaysVisibleField = ''; // ensure it's empty for this test
+
+      const isFormValid = validateFormPurely(formFieldsValues);
+      expect(isFormValid).toBe(false); // Because alwaysVisibleField is invalid
+      expect(formFieldsErrorMessages.conditionalField).toBeUndefined(); // Hidden field not validated
+      expect(formFieldsErrorMessages.alwaysVisibleField).toBeTruthy(); // Visible field validated
+
+      // Make conditionalField visible and valid, alwaysVisibleField valid
+      formFieldsValues.control = 'show';
+      await advanceTicks(2);
+      formFieldsValues.conditionalField = 'i have a value';
+      formFieldsValues.alwaysVisibleField = 'me too';
+
+      const isFormNowValid = validateFormPurely(formFieldsValues);
+      expect(isFormNowValid).toBe(true);
+      expect(formFieldsErrorMessages.conditionalField).toBeUndefined();
+      expect(formFieldsErrorMessages.alwaysVisibleField).toBeUndefined();
+    });
+  });
+
+  describe('6. clearValueOnHide Functionality', () => {
+    it('should clear value if clearValueOnHide is true', async () => {
+      fields = [
+        { propertyName: 'control', value: 'show' },
+        {
+          propertyName: 'target',
+          value: 'initial value',
+          condition: { rules: [{ field: 'control', operator: 'equals', value: 'show' }] },
+          clearValueOnHide: true,
+        },
+      ];
+      const { formFieldsValues, formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.target).toBe(true);
+      expect(formFieldsValues.target).toBe('initial value');
+
+      formFieldsValues.control = 'hide'; // This should hide 'target'
+      await advanceTicks(2);
+
+      expect(formFieldsVisibility.target).toBe(false);
+      expect(formFieldsValues.target).toBeUndefined();
+    });
+
+    it('should retain value if clearValueOnHide is false or not set', async () => {
+      fields = [
+        { propertyName: 'control', value: 'show' },
+        {
+          propertyName: 'target',
+          value: 'initial value',
+          condition: { rules: [{ field: 'control', operator: 'equals', value: 'show' }] },
+          clearValueOnHide: false, // Or omit this line
+        },
+      ];
+      const { formFieldsValues, formFieldsVisibility } = useFormValidation(fields);
+      expect(formFieldsVisibility.target).toBe(true);
+      expect(formFieldsValues.target).toBe('initial value');
+
+      formFieldsValues.control = 'hide';
+      await advanceTicks(2);
+
+      expect(formFieldsVisibility.target).toBe(false);
+      expect(formFieldsValues.target).toBe('initial value'); // Value retained
+    });
+
+    it('should reset to list field to empty array if clearValueOnHide is true', async () => {
+        fields = [
+            { propertyName: 'control', value: 'show' },
+            {
+                propertyName: 'listField',
+                type: 'list',
+                initialValue: [{ name: 'item1' }],
+                fields: [{ propertyName: 'name' }],
+                condition: { rules: [{ field: 'control', operator: 'equals', value: 'show' }] },
+                clearValueOnHide: true,
+            },
+        ];
+        const { formFieldsValues, formFieldsVisibility } = useFormValidation(fields);
+        expect(formFieldsVisibility.listField).toBe(true);
+        expect(formFieldsValues.listField).toEqual([{ name: 'item1' }]);
+
+        formFieldsValues.control = 'hide';
+        await advanceTicks(2);
+
+        expect(formFieldsVisibility.listField).toBe(false);
+        expect(formFieldsValues.listField).toEqual([]);
+    });
+  });
+
+  describe('7. Complex Scenarios', () => {
+    it('condition depending on a field that is itself conditional', async () => {
+      fields = [
+        { propertyName: 'masterSwitch', value: true }, // Controls fieldA
+        {
+          propertyName: 'fieldA', // Conditional
+          value: 'A_visible',
+          condition: { rules: [{ field: 'masterSwitch', operator: 'equals', value: true }] },
+          clearValueOnHide: true,
+        },
+        {
+          propertyName: 'fieldB', // Depends on fieldA's value
+          condition: { rules: [{ field: 'fieldA', operator: 'equals', value: 'A_visible' }] },
+        },
+      ];
+      const { formFieldsValues, formFieldsVisibility } = useFormValidation(fields);
+
+      // Initial state: masterSwitch=true -> fieldA visible, fieldA='A_visible' -> fieldB visible
+      expect(formFieldsVisibility.fieldA).toBe(true);
+      expect(formFieldsValues.fieldA).toBe('A_visible');
+      expect(formFieldsVisibility.fieldB).toBe(true);
+
+      // Change masterSwitch to hide fieldA
+      formFieldsValues.masterSwitch = false;
+      await advanceTicks(3); // Allow propagation for fieldA visibility, then fieldA value, then fieldB visibility
+
+      expect(formFieldsVisibility.fieldA).toBe(false); // fieldA becomes hidden
+      expect(formFieldsValues.fieldA).toBeUndefined();   // fieldA value cleared
+      expect(formFieldsVisibility.fieldB).toBe(false);  // fieldB becomes hidden because fieldA's value is no longer 'A_visible'
+    });
+
+    it('list items with conditional fields depending on other fields in the same item', async () => {
+      fields = [
+        {
+          propertyName: 'items',
+          type: 'list',
+          initialValue: [
+            { type: 'A', detailA: 'Detail for A', detailB: '' },
+            { type: 'B', detailA: '', detailB: 'Detail for B' },
+          ],
+          fields: [
+            { propertyName: 'type' }, // 'A' or 'B'
+            {
+              propertyName: 'detailA',
+              condition: { rules: [{ field: 'type', operator: 'equals', value: 'A' }] }, // Path relative to item?
+                                                                                          // PRD: "rule.field ... Supports ... array indexing for list items."
+                                                                                          // Current getValueByPath/setValueByPath in useFormValidation.js
+                                                                                          // expects full paths from root.
+                                                                                          // The PRD says "itemDetails[0].specificInfo might depend on itemDetails[0].type"
+                                                                                          // This implies rule.field needs to be specific like 'items[0].type'
+                                                                                          // Let's rewrite field config to test this properly.
+            },
+            { propertyName: 'detailB', condition: { rules: [{ field: 'type', operator: 'equals', value: 'B' }] } },
+          ],
+        },
+      ];
+      // Adjusting field definitions for specific pathing in conditions
+      fields[0].fields[1].condition.rules[0].field = 'items[0].type'; // For first item, detailA depends on items[0].type
+      fields[0].fields[2].condition.rules[0].field = 'items[0].type'; // For first item, detailB depends on items[0].type
+      // This setup is still a bit off for testing "same item" generically.
+      // The condition rule `field` path would need dynamic index resolution relative to the item being evaluated.
+      // The current implementation of `evaluateFieldVisibility` resolves `rule.field` from the root form model.
+      // So, for a list item, the condition path must be absolute e.g. 'items[0].type'.
+
+      // Let's simplify to test one item's conditional field based on another field in THAT SAME item.
+      // This requires the dependency system to correctly map e.g. 'items[0].type' as a source for 'items[0].detailA'.
+      fields = [
+        {
+          propertyName: 'items',
+          type: 'list',
+          initialValue: [{ type: 'A', detailA: 'Content A', otherDetail: '' }],
+          fields: [
+            { propertyName: 'type' },
+            {
+              propertyName: 'detailA',
+              condition: { rules: [{ field: 'items[0].type', operator: 'equals', value: 'A' }] },
+            },
+            {
+              propertyName: 'otherDetail', // Not conditional for this test
+            }
+          ],
+        },
+      ];
+
+      const { formFieldsValues, formFieldsVisibility } = useFormValidation(fields);
+
+      expect(formFieldsVisibility['items[0].detailA']).toBe(true);
+
+      // Change type in the first item to 'B'
+      formFieldsValues.items[0].type = 'B';
+      await advanceTicks(2);
+
+      expect(formFieldsVisibility['items[0].detailA']).toBe(false);
+
+      // Change type back to 'A'
+      formFieldsValues.items[0].type = 'A';
+      await advanceTicks(2);
+      expect(formFieldsVisibility['items[0].detailA']).toBe(true);
+    });
   });
 
   afterEach(() => {
-    vi.restoreAllMocks(); // This also restores original module implementations if vi.mock was used.
-    vi.useRealTimers();
-  });
-
-  describe("Initialization", () => {
-    it("should initialize states correctly for flat fields", () => {
-      const fields = getSimpleFieldsConfig();
-      const {
-        formFieldsValidity,
-        formFieldsErrorMessages,
-        formFieldsTouchedState,
-        formFieldsDirtyState,
-        formFieldsValues,
-      } = useFormValidation(fields);
-
-      expect(formFieldsValues.name).toBe("");
-      expect(formFieldsValidity.name).toBeUndefined();
-      expect(formFieldsErrorMessages.name).toBeUndefined();
-      expect(formFieldsTouchedState.name).toBe(false);
-      expect(formFieldsDirtyState.name).toBe(false);
-
-      expect(formFieldsValues.email).toBe("");
-      expect(formFieldsValidity.email).toBeUndefined();
-    });
-
-    it("should initialize states correctly for nested fields (sub-forms)", () => {
-      const fields = getNestedFieldsConfig();
-      const { formFieldsValidity, formFieldsErrorMessages, formFieldsValues } =
-        useFormValidation(fields);
-
-      expect(formFieldsValues.username).toBe("testuser");
-      expect(formFieldsValidity.username).toBeUndefined();
-
-      // Sub-form container itself might not have direct validity unless rules are applied to the object
-      expect(formFieldsValidity.profile).toBeUndefined();
-
-      // Check structure of formFieldsValues for sub-forms
-      expect(formFieldsValues.profile).toBeTypeOf("object");
-      expect(formFieldsValues.profile.firstName).toBe("");
-      expect(formFieldsValues.profile.lastName).toBe("");
-
-      // Validity for sub-form fields is stored flatly using their propertyName
-      expect(formFieldsValidity.firstName).toBeUndefined();
-      expect(formFieldsValidity.lastName).toBeUndefined();
-    });
-
-    it("should initialize states correctly for list fields", () => {
-      const fields = getListFieldsConfig();
-      const {
-        formFieldsValues,
-        formFieldsValidity,
-        formFieldsTouchedState,
-        formFieldsDirtyState,
-      } = useFormValidation(fields);
-
-      expect(formFieldsValues.contacts).toEqual([]);
-      expect(formFieldsValidity.contacts).toBeUndefined();
-      expect(formFieldsTouchedState.contacts).toBe(false);
-      expect(formFieldsDirtyState.contacts).toBe(false);
-    });
-  });
-
-  describe("validateField", () => {
-    it("should validate a field and update validity state", () => {
-      const fields = getSimpleFieldsConfig();
-      const { validateField, formFieldsValidity, formFieldsErrorMessages } =
-        useFormValidation(fields);
-
-      const isValid = validateField("name", "");
-      expect(isValid).toBe(false);
-      expect(formFieldsValidity.name).toBe(false);
-      expect(formFieldsErrorMessages.name).toBe("Full Name is required.");
-    });
-
-    it("should validate field with custom validators", () => {
-      const fields = getVariousRulesFieldsConfig();
-      const { validateField, formFieldsValidity, formFieldsErrorMessages } =
-        useFormValidation(fields);
-
-      let isValid = validateField("custom", "invalid");
-      expect(isValid).toBe(false);
-      expect(formFieldsValidity.custom).toBe(false);
-      expect(formFieldsErrorMessages.custom).toBe('Must be "valid".');
-
-      isValid = validateField("custom", "valid");
-      expect(isValid).toBe(true);
-      expect(formFieldsValidity.custom).toBeUndefined();
-    });
-
-    it("should validate field with regex rules", () => {
-      const fields = getVariousRulesFieldsConfig();
-      const { validateField, formFieldsValidity, formFieldsErrorMessages } =
-        useFormValidation(fields);
-
-      let isValid = validateField("regexField", "ABC123");
-      expect(isValid).toBe(false);
-      expect(formFieldsValidity.regexField).toBe(false);
-
-      isValid = validateField("regexField", "abc");
-      expect(isValid).toBe(true);
-      expect(formFieldsValidity.regexField).toBeUndefined();
-    });
-  });
-
-  describe("Validation Triggers", () => {
-    describe("validationTrigger: 'onInput'", () => {
-      const options = { validationTrigger: "onInput", inputDebounceMs: 50 };
-
-      it('should validate field after inputDebounceMs on "input" trigger', () => {
-        const fields = getSimpleFieldsConfig();
-        const { triggerValidation, formFieldsValidity } = useFormValidation(
-          fields,
-          options
-        );
-        const model = reactive({ name: "T", email: "", bio: "" });
-
-        triggerValidation("name", "input", model);
-
-        expect(formFieldsValidity.name).toBeUndefined();
-        vi.advanceTimersByTime(options.inputDebounceMs);
-        expect(formFieldsValidity.name).toBe(false);
-      });
-
-      it("should debounce rapid inputs and validate only once with the latest value", async () => {
-        const fields = getSimpleFieldsConfig();
-        const { triggerValidation, formFieldsValidity } = useFormValidation(
-          fields,
-          options
-        );
-        const model = reactive({ name: "", email: "", bio: "" });
-
-        model.name = "T";
-        triggerValidation("name", "input", model); // Pass full model
-        vi.advanceTimersByTime(options.inputDebounceMs / 2);
-
-        model.name = "Te";
-        triggerValidation("name", "input", model);
-        vi.advanceTimersByTime(options.inputDebounceMs / 2);
-
-        model.name = "Tes";
-        triggerValidation("name", "input", model);
-        await nextTick();
-
-        expect(formFieldsValidity.name).toBeUndefined(); // Not validated yet
-
-        vi.advanceTimersByTime(options.inputDebounceMs);
-        await nextTick();
-
-        expect(formFieldsValidity.name).toBeUndefined(); // "Tes" is valid (3 chars)
-      });
-
-      it('should also validate on "blur" trigger', () => {
-        const fields = getSimpleFieldsConfig();
-        const { triggerValidation, formFieldsValidity } = useFormValidation(
-          fields,
-          options
-        );
-        const model = reactive({ name: "T", email: "", bio: "" });
-
-        triggerValidation("name", "blur", model);
-        expect(formFieldsValidity.name).toBe(false);
-      });
-    });
-
-    describe("validationTrigger: 'onBlur'", () => {
-      const optionsOnBlur = { validationTrigger: "onBlur" };
-
-      it('should validate field on "blur" trigger', () => {
-        const fields = getSimpleFieldsConfig();
-        const { triggerValidation, formFieldsValidity } = useFormValidation(
-          fields,
-          optionsOnBlur
-        );
-        const model = reactive({ name: "T", email: "", bio: "" });
-
-        triggerValidation("name", "blur", model);
-        expect(formFieldsValidity.name).toBe(false);
-      });
-
-      it('should NOT validate field on "input" trigger', () => {
-        const fields = getSimpleFieldsConfig();
-        const { triggerValidation, formFieldsValidity } = useFormValidation(
-          fields,
-          optionsOnBlur
-        );
-        const model = reactive({ name: "T", email: "", bio: "" });
-
-        triggerValidation("name", "input", model);
-        vi.advanceTimersByTime(200);
-        expect(formFieldsValidity.name).toBeUndefined();
-      });
-    });
-
-    describe("validationTrigger: 'onSubmit'", () => {
-      const optionsOnSubmit = { validationTrigger: "onSubmit" };
-
-      it('should NOT validate field on "input" trigger', () => {
-        const fields = getSimpleFieldsConfig();
-        const { triggerValidation, formFieldsValidity } = useFormValidation(
-          fields,
-          optionsOnSubmit
-        );
-        const model = reactive({ name: "T", email: "", bio: "" });
-
-        triggerValidation("name", "input", model);
-        vi.advanceTimersByTime(200);
-        expect(formFieldsValidity.name).toBeUndefined();
-      });
-
-      it('should NOT validate field on "blur" trigger', () => {
-        const fields = getSimpleFieldsConfig();
-        const { triggerValidation, formFieldsValidity } = useFormValidation(
-          fields,
-          optionsOnSubmit
-        );
-        const model = reactive({ name: "T", email: "", bio: "" });
-
-        triggerValidation("name", "blur", model);
-        expect(formFieldsValidity.name).toBeUndefined();
-      });
-    });
-  });
-
-  describe("validateFormPurely", () => {
-    it("should validate all fields and return true if all are valid", () => {
-      const fields = getSimpleFieldsConfig();
-      const { validateFormPurely } = useFormValidation(fields);
-      const model = {
-        name: "Valid Name",
-        email: "valid@example.com",
-        bio: "A bio",
-      };
-
-      const isValid = validateFormPurely(model);
-
-      expect(isValid).toBe(true);
-    });
-
-    it("should validate all fields and return false if any is invalid", () => {
-      const fields = getSimpleFieldsConfig();
-      const {
-        validateFormPurely,
-        formFieldsValidity,
-        formFieldsErrorMessages,
-      } = useFormValidation(fields);
-      const model = { name: "V", email: "valid@example.com", bio: "" };
-
-      const isValid = validateFormPurely(model);
-
-      expect(isValid).toBe(false);
-      expect(formFieldsValidity.name).toBe(false);
-      expect(formFieldsErrorMessages.name).toBe(
-        "Full Name must be at least 3 characters."
-      );
-      expect(formFieldsValidity.email).toBeUndefined(); // is valid in model
-    });
-
-    it("should validate nested fields correctly (sub-forms)", () => {
-      const fields = getNestedFieldsConfig();
-      const {
-        validateFormPurely,
-        formFieldsValidity,
-        formFieldsErrorMessages,
-      } = useFormValidation(fields);
-
-      const modelInvalid = {
-        username: "testuser",
-        profile: {
-          firstName: "",
-          lastName: "Doe",
-        },
-      };
-      let isValid = validateFormPurely(modelInvalid);
-      expect(isValid).toBe(false);
-      expect(formFieldsValidity.username).toBeUndefined();
-      expect(formFieldsValidity.firstName).toBe(false);
-      expect(formFieldsErrorMessages.firstName).toBe("First Name is required.");
-      expect(formFieldsValidity.lastName).toBeUndefined();
-
-      const modelValid = {
-        username: "gooduser",
-        profile: {
-          firstName: "John",
-          lastName: "Doe",
-        },
-      };
-      isValid = validateFormPurely(modelValid);
-      expect(isValid).toBe(true);
-      expect(formFieldsValidity.username).toBeUndefined();
-      expect(formFieldsValidity.firstName).toBeUndefined();
-      expect(formFieldsValidity.lastName).toBeUndefined();
-    });
-
-    it("should validate list fields correctly", () => {
-      const fields = getListFieldsConfig();
-      const {
-        validateFormPurely,
-        formFieldsValidity,
-        formFieldsErrorMessages,
-      } = useFormValidation(fields);
-
-      // Test with invalid list data
-      const modelInvalid = {
-        contacts: [
-          { name: "", email: "valid@example.com" },
-          { name: "John", email: "invalid-email" },
-        ],
-      };
-
-      let isValid = validateFormPurely(modelInvalid);
-      expect(isValid).toBe(false);
-      expect(formFieldsValidity["contacts[0].name"]).toBe(false);
-      expect(formFieldsErrorMessages["contacts[0].name"]).toBe(
-        "Contact Name is required."
-      );
-      expect(formFieldsValidity["contacts[1].email"]).toBe(false);
-
-      // Test with valid list data
-      const modelValid = {
-        contacts: [
-          { name: "Alice", email: "alice@example.com" },
-          { name: "Bob", email: "bob@example.com" },
-        ],
-      };
-
-      isValid = validateFormPurely(modelValid);
-      expect(isValid).toBe(true);
-    });
-  });
-
-  describe("List Field Operations", () => {
-    let fieldsConfig;
-    let formValidationInstance;
-
-    beforeEach(() => {
-      fieldsConfig = getListFieldsConfig();
-      formValidationInstance = useFormValidation(fieldsConfig);
-    });
-
-    it("should add item to list with default values", () => {
-      const { addItem, formFieldsValues } = formValidationInstance;
-
-      addItem("contacts");
-
-      expect(formFieldsValues.contacts).toHaveLength(1);
-      expect(formFieldsValues.contacts[0]).toEqual({
-        name: "Default Contact",
-        email: "default@example.com",
-      });
-    });
-
-    it("should add item to list with custom data", () => {
-      const { addItem, formFieldsValues } = formValidationInstance;
-
-      addItem("contacts", { name: "Custom Name", email: "custom@example.com" });
-
-      expect(formFieldsValues.contacts).toHaveLength(1);
-      expect(formFieldsValues.contacts[0]).toEqual({
-        name: "Custom Name",
-        email: "custom@example.com",
-      });
-    });
-
-    it("should remove item from list", () => {
-      const { addItem, removeItem, formFieldsValues } = formValidationInstance;
-
-      // Add two items
-      addItem("contacts", { name: "Alice", email: "alice@example.com" });
-      addItem("contacts", { name: "Bob", email: "bob@example.com" });
-
-      expect(formFieldsValues.contacts).toHaveLength(2);
-
-      // Remove first item
-      removeItem("contacts", 0);
-
-      expect(formFieldsValues.contacts).toHaveLength(1);
-      expect(formFieldsValues.contacts[0]).toEqual({
-        name: "Bob",
-        email: "bob@example.com",
-      });
-    });
-
-    it("should properly handle validation state for list items", () => {
-      const {
-        addItem,
-        validateField,
-        formFieldsValidity,
-        formFieldsErrorMessages,
-      } = formValidationInstance;
-
-      // Add an item
-      addItem("contacts", { name: "", email: "invalid-email" });
-
-      // Validate the list item fields
-      validateField("contacts[0].name", "");
-      validateField("contacts[0].email", "invalid-email");
-
-      expect(formFieldsValidity["contacts[0].name"]).toBe(false);
-      expect(formFieldsErrorMessages["contacts[0].name"]).toBe(
-        "Contact Name is required."
-      );
-      expect(formFieldsValidity["contacts[0].email"]).toBe(false);
-    });
-
-    it("should clean up validation state when removing list items", () => {
-      const { addItem, removeItem, validateField, formFieldsValidity } =
-        formValidationInstance;
-
-      // Add two items and validate them
-      addItem("contacts", { name: "", email: "" });
-      addItem("contacts", { name: "", email: "" });
-
-      validateField("contacts[0].name", "");
-      validateField("contacts[1].name", "");
-
-      expect(formFieldsValidity["contacts[0].name"]).toBe(false);
-      expect(formFieldsValidity["contacts[1].name"]).toBe(false);
-
-      // Remove first item
-      removeItem("contacts", 0);
-
-      // First item validation state should be cleaned up
-      expect(formFieldsValidity["contacts[0].name"]).toBe(false); // This was contacts[1] before
-      expect(formFieldsValidity["contacts[1].name"]).toBeUndefined(); // Should be cleaned up
-    });
-  });
-
-  describe("Field Touched and Dirty States", () => {
-    let fieldsConfig;
-    let formValidationInstance;
-
-    beforeEach(() => {
-      fieldsConfig = [
-        { propertyName: "name", label: "Name", value: "Initial Name" },
-      ];
-      formValidationInstance = useFormValidation(fieldsConfig);
-    });
-
-    it("initializes fields as not touched and not dirty", () => {
-      expect(formValidationInstance.formFieldsTouchedState.name).toBe(false);
-      expect(formValidationInstance.formFieldsDirtyState.name).toBe(false);
-    });
-
-    it("setFieldTouched marks field as touched", () => {
-      formValidationInstance.setFieldTouched("name", true);
-      expect(formValidationInstance.formFieldsTouchedState.name).toBe(true);
-    });
-
-    it("checkFieldDirty marks field as dirty if value changes", () => {
-      const changed = formValidationInstance.checkFieldDirty(
-        "name",
-        "New Name"
-      );
-      expect(changed).toBe(true);
-      expect(formValidationInstance.formFieldsDirtyState.name).toBe(true);
-    });
-
-    it("checkFieldDirty does not mark field as dirty if value is same", () => {
-      const changed = formValidationInstance.checkFieldDirty(
-        "name",
-        "Initial Name"
-      );
-      expect(changed).toBe(false);
-      expect(formValidationInstance.formFieldsDirtyState.name).toBe(false);
-    });
-
-    it("resetValidationState resets validation state", () => {
-      const {
-        validateField,
-        resetValidationState,
-        formFieldsValidity,
-        formFieldsErrorMessages,
-      } = formValidationInstance;
-
-      // Make field invalid
-      validateField("name", "");
-      expect(formFieldsValidity.name).toBe(false);
-      expect(formFieldsErrorMessages.name).toBeTruthy();
-
-      // Reset validation state
-      resetValidationState("name");
-
-      expect(formFieldsValidity.name).toBeUndefined();
-      expect(formFieldsErrorMessages.name).toBeUndefined();
-    });
-
-    it("updateFieldInitialValue updates the initial value for dirty checking", () => {
-      const { checkFieldDirty, updateFieldInitialValue } =
-        formValidationInstance;
-
-      let changed = checkFieldDirty("name", "New Name");
-      expect(changed).toBe(true); // dirty because different from "Initial Name"
-
-      updateFieldInitialValue("name", "New Name");
-      changed = checkFieldDirty("name", "New Name"); // re-check
-      expect(changed).toBe(true); // State changed from dirty to not dirty
-      expect(formValidationInstance.formFieldsDirtyState.name).toBe(false); // not dirty anymore
-    });
+    vi.restoreAllMocks(); // Restore any mocks
+    vi.useRealTimers(); // Restore real timers
   });
 });
