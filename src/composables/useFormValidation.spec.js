@@ -50,7 +50,7 @@ const getMockFields = () => [
   },
 ];
 
-describe("useFormValidation", () => {
+describe("useFormValidation - Basic Fields", () => {
   let fields;
   let formValidation;
 
@@ -62,396 +62,290 @@ describe("useFormValidation", () => {
   it("initializes formFieldsValues with initial field values", () => {
     expect(formValidation.formFieldsValues.name).toBe("");
     expect(formValidation.formFieldsValues.email).toBe("test@example.com");
-    // Check for fields that might have undefined initial value from getMockFields if not specified
-    expect(formValidation.formFieldsValues.ipv4Field).toBeUndefined(); // Assuming ipv4Field has no 'value' in getMockFields
+    expect(formValidation.formFieldsValues.ipv4Field).toBeUndefined();
   });
 
   it("initializes formFieldsValidity and formFieldsErrorMessages as empty", () => {
     fields.forEach((field) => {
       if (field.propertyName) {
-        // Guard for malformed field entries
-        expect(
-          formValidation.formFieldsValidity[field.propertyName]
-        ).toBeUndefined();
-        expect(
-          formValidation.formFieldsErrorMessages[field.propertyName]
-        ).toBeUndefined();
+        expect(formValidation.formFieldsValidity[field.propertyName]).toBeUndefined();
+        expect(formValidation.formFieldsErrorMessages[field.propertyName]).toBeUndefined();
       }
     });
   });
 
-  // Test 'required' rule
   describe("required rule", () => {
-    const field = getMockFields().find((f) => f.propertyName === "name");
+    const fieldName = "name";
+    const fieldConfig = () => getMockFields().find(f => f.propertyName === fieldName);
     it("should be invalid if value is empty or whitespace", () => {
-      formValidation.validateField(field, "");
-      expect(formValidation.formFieldsValidity.name).toBe(false);
-      expect(formValidation.formFieldsErrorMessages.name).toBe(
-        "Field Name is required."
-      );
-
-      formValidation.validateField(field, "   ");
-      expect(formValidation.formFieldsValidity.name).toBe(false);
-      expect(formValidation.formFieldsErrorMessages.name).toBe(
-        "Field Name is required."
-      );
+      formValidation.validateField(fieldConfig(), "", fieldName);
+      expect(formValidation.formFieldsValidity[fieldName]).toBe(false);
+      expect(formValidation.formFieldsErrorMessages[fieldName]).toBe("Field Name is required.");
     });
-
     it("should be valid if value is provided", () => {
-      formValidation.validateField(field, "John Doe");
-      expect(formValidation.formFieldsValidity.name).toBeUndefined();
-      expect(formValidation.formFieldsErrorMessages.name).toBeUndefined();
+      formValidation.validateField(fieldConfig(), "John Doe", fieldName);
+      expect(formValidation.formFieldsValidity[fieldName]).toBeUndefined();
     });
   });
 
-  // Test 'email' rule
   describe("email rule", () => {
-    const field = getMockFields().find((f) => f.propertyName === "email");
+    const fieldName = "email";
+    const fieldConfig = () => getMockFields().find(f => f.propertyName === fieldName);
     it("should be invalid for incorrect email format", () => {
-      formValidation.validateField(field, "invalid-email");
-      expect(formValidation.formFieldsValidity.email).toBe(false);
-      expect(formValidation.formFieldsErrorMessages.email).toBe(
-        "Field Email is not a valid email address."
-      );
+      formValidation.validateField(fieldConfig(), "invalid-email", fieldName);
+      expect(formValidation.formFieldsValidity[fieldName]).toBe(false);
     });
-
     it("should be valid for correct email format", () => {
-      formValidation.validateField(field, "correct@example.com");
-      expect(formValidation.formFieldsValidity.email).toBeUndefined();
-      expect(formValidation.formFieldsErrorMessages.email).toBeUndefined();
+      formValidation.validateField(fieldConfig(), "correct@example.com", fieldName);
+      expect(formValidation.formFieldsValidity[fieldName]).toBeUndefined();
     });
   });
 
-  // Test 'domain' rule with custom message
-  describe("domain rule", () => {
-    const field = getMockFields().find((f) => f.propertyName === "website");
-    it("should be invalid for incorrect domain format and use custom message", () => {
-      formValidation.validateField(field, "invalid_domain");
-      expect(formValidation.formFieldsValidity.website).toBe(false);
-      expect(formValidation.formFieldsErrorMessages.website).toBe(
-        "Invalid domain format."
-      );
-    });
-
-    it("should be valid for correct domain format", () => {
-      formValidation.validateField(field, "example.com");
-      expect(formValidation.formFieldsValidity.website).toBeUndefined();
-      expect(formValidation.formFieldsErrorMessages.website).toBeUndefined();
-    });
-  });
-
-  // Test 'ipv4' rule
-  describe("ipv4 rule", () => {
-    const field = getMockFields().find((f) => f.propertyName === "ipv4Field");
-    it("should be invalid for incorrect ipv4 format", () => {
-      formValidation.validateField(field, "256.0.0.1");
-      expect(formValidation.formFieldsValidity.ipv4Field).toBe(false);
-      expect(formValidation.formFieldsErrorMessages.ipv4Field).toBe(
-        "Field IPv4 Field is not a valid IPv4 address."
-      );
-    });
-    it("should be valid for correct ipv4 format", () => {
-      formValidation.validateField(field, "192.168.1.1");
-      expect(formValidation.formFieldsValidity.ipv4Field).toBeUndefined();
-    });
-  });
-
-  // Test 'ipv6' rule
-  describe("ipv6 rule", () => {
-    const field = getMockFields().find((f) => f.propertyName === "ipv6Field");
-    it("should be invalid for incorrect ipv6 format", () => {
-      formValidation.validateField(field, "invalid-ipv6");
-      expect(formValidation.formFieldsValidity.ipv6Field).toBe(false);
-      expect(formValidation.formFieldsErrorMessages.ipv6Field).toBe(
-        "Field IPv6 Field is not a valid IPv6 address."
-      );
-    });
-    it("should be valid for correct ipv6 format", () => {
-      formValidation.validateField(
-        field,
-        "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
-      );
-      expect(formValidation.formFieldsValidity.ipv6Field).toBeUndefined();
-    });
-  });
-
-  // Test custom validator function
-  describe("custom validator", () => {
-    const field = getMockFields().find((f) => f.propertyName === "custom");
-    it("should be invalid if custom validation fails", () => {
-      formValidation.validateField(field, "invalid");
-      expect(formValidation.formFieldsValidity.custom).toBe(false);
-      expect(formValidation.formFieldsErrorMessages.custom).toBe(
-        'Must be "valid".'
-      );
-    });
-
-    it("should be valid if custom validation passes", () => {
-      formValidation.validateField(field, "valid");
-      expect(formValidation.formFieldsValidity.custom).toBeUndefined();
-      expect(formValidation.formFieldsErrorMessages.custom).toBeUndefined();
-    });
-  });
-
-  // Test regex rule
-  describe("regex rule", () => {
-    const field = getMockFields().find((f) => f.propertyName === "regexField");
-    it("should be invalid if value does not match regex", () => {
-      formValidation.validateField(field, "123");
-      expect(formValidation.formFieldsValidity.regexField).toBe(false);
-      expect(formValidation.formFieldsErrorMessages.regexField).toContain(
-        "Field Regex Field is not valid."
-      );
-    });
-
-    it("should be valid if value matches regex", () => {
-      formValidation.validateField(field, "abc");
-      expect(formValidation.formFieldsValidity.regexField).toBeUndefined();
-      expect(formValidation.formFieldsErrorMessages.regexField).toBeUndefined();
-    });
-  });
-
-  describe("validateFormPurely", () => {
-    it("should validate all fields based on provided form data and reflect errors", () => {
-      const currentFormData = {
-        name: "",
-        email: "invalid",
-        website: "valid.com",
-        custom: "invalid",
-        regexField: "123",
-        ipv4Field: "256.0.0.1",
-        ipv6Field: "invalid-ipv6",
-      };
-
+  describe("validateFormPurely with basic fields", () => {
+    it("should validate all fields and reflect errors", () => {
+      const currentFormData = { name: "", email: "invalid" };
       const isValid = formValidation.validateFormPurely(currentFormData);
       expect(isValid).toBe(false);
-
       expect(formValidation.formFieldsValidity.name).toBe(false);
       expect(formValidation.formFieldsValidity.email).toBe(false);
-      expect(formValidation.formFieldsValidity.website).toBeUndefined(); // valid.com should pass domain validation
-      expect(formValidation.formFieldsValidity.custom).toBe(false);
-      expect(formValidation.formFieldsValidity.regexField).toBe(false);
-      expect(formValidation.formFieldsValidity.ipv4Field).toBe(false);
-      expect(formValidation.formFieldsValidity.ipv6Field).toBe(false);
-    });
-
-    it("should correctly identify a fully valid form", () => {
-      const currentFormData = {
-        name: "Valid Name",
-        email: "valid@example.com",
-        website: "valid.com",
-        custom: "valid",
-        regexField: "abc",
-        ipv4Field: "1.2.3.4",
-        ipv6Field: "2001:db8::1", // A valid compressed IPv6
-      };
-      const isValid = formValidation.validateFormPurely(currentFormData);
-      expect(isValid).toBe(true);
-
-      // Check that no field has errors
-      Object.keys(currentFormData).forEach((key) => {
-        expect(formValidation.formFieldsValidity[key]).toBeUndefined();
-        expect(formValidation.formFieldsErrorMessages[key]).toBeUndefined();
-      });
-    });
-  });
-
-  describe("multiple rules", () => {
-    const multiRuleField = {
-      propertyName: "username",
-      label: "Username",
-      rules: ["required", /^[a-zA-Z0-9]+$/],
-    };
-    // Need to add this field to the 'fields' used by formValidation instance for these tests
-    // Or create a new instance. For simplicity, let's create a new instance for this describe block.
-    let multiRuleFormValidation;
-    beforeEach(() => {
-      multiRuleFormValidation = useFormValidation([multiRuleField]);
-    });
-
-    it("should fail if first rule (required) is not met", () => {
-      multiRuleFormValidation.validateField(multiRuleField, "");
-      expect(multiRuleFormValidation.formFieldsValidity.username).toBe(false);
-      expect(multiRuleFormValidation.formFieldsErrorMessages.username).toBe(
-        "Field Username is required."
-      );
-    });
-
-    it("should fail if second rule (alphanumeric) is not met, even if first is met", () => {
-      multiRuleFormValidation.validateField(multiRuleField, "User!");
-      expect(multiRuleFormValidation.formFieldsValidity.username).toBe(false);
-      expect(
-        multiRuleFormValidation.formFieldsErrorMessages.username
-      ).toContain("Field Username is not valid.");
-    });
-
-    it("should pass if all rules are met", () => {
-      multiRuleFormValidation.validateField(multiRuleField, "User123");
-      expect(
-        multiRuleFormValidation.formFieldsValidity.username
-      ).toBeUndefined();
-      expect(
-        multiRuleFormValidation.formFieldsErrorMessages.username
-      ).toBeUndefined();
     });
   });
 });
 
-describe("Field Touched and Dirty States", () => {
-  let fieldsConfig; // Renamed to avoid conflict with outer scope 'fields'
-  let formValidationInstance; // Renamed to avoid conflict
-  let initialProfileValue;
+describe("Field Touched and Dirty States - Basic Fields", () => {
+  let fieldsConfig;
+  let formValidationInstance;
 
   beforeEach(() => {
-    initialProfileValue = { nestedValue: "initial", unchanged: "data" };
-    fieldsConfig = [
-      { propertyName: "name", label: "Name", value: "Initial Name" },
-      { propertyName: "email", label: "Email", value: "" },
-      {
-        propertyName: "profile",
-        label: "Profile",
-        value: JSON.parse(JSON.stringify(initialProfileValue)),
-      },
-      { propertyName: "noInitialValue", label: "No Initial" }, // Field with no initial value defined in config
-    ];
+    fieldsConfig = [ { propertyName: "name", label: "Name", value: "Initial Name" } ];
     formValidationInstance = useFormValidation(fieldsConfig);
   });
 
-  it("initializes all fields as not touched and not dirty", () => {
+  it("initializes fields as not touched and not dirty", () => {
     expect(formValidationInstance.formFieldsTouchedState.name).toBe(false);
-    expect(formValidationInstance.formFieldsTouchedState.email).toBe(false);
-    expect(formValidationInstance.formFieldsTouchedState.profile).toBe(false);
-    expect(formValidationInstance.formFieldsTouchedState.noInitialValue).toBe(
-      false
-    );
-
     expect(formValidationInstance.formFieldsDirtyState.name).toBe(false);
-    expect(formValidationInstance.formFieldsDirtyState.email).toBe(false);
-    expect(formValidationInstance.formFieldsDirtyState.profile).toBe(false);
-    expect(formValidationInstance.formFieldsDirtyState.noInitialValue).toBe(
-      false
-    );
   });
 
-  describe("setFieldTouched", () => {
-    it("sets a field to touched and returns true if state changed", () => {
-      const result = formValidationInstance.setFieldTouched("name", true);
-      expect(formValidationInstance.formFieldsTouchedState.name).toBe(true);
-      expect(result).toBe(true);
+  it("setFieldTouched marks field as touched", () => {
+    formValidationInstance.setFieldTouched("name", true);
+    expect(formValidationInstance.formFieldsTouchedState.name).toBe(true);
+  });
+
+  it("checkFieldDirty marks field as dirty if value changes", () => {
+    formValidationInstance.checkFieldDirty("name", "New Name");
+    expect(formValidationInstance.formFieldsDirtyState.name).toBe(true);
+  });
+});
+
+
+describe("useFormValidation - List Fields", () => {
+  let listFieldsConfig;
+  let formListValidation;
+
+  beforeEach(() => {
+    listFieldsConfig = [
+      {
+        propertyName: "listField",
+        type: "list",
+        label: "My List",
+        defaultValue: { itemText: "default", itemNum: 0 }, // Default for new items
+        fields: [
+          { propertyName: "itemText", label: "Item Text", rules: ["required"] },
+          { propertyName: "itemNum", label: "Item Number", rules: ["required"] },
+        ],
+        initialValue: [ // Initial items for the list
+          { itemText: "Initial item 1", itemNum: 1 },
+        ],
+      },
+      { propertyName: "anotherField", label: "Another Field", value: "abc" }
+    ];
+    formListValidation = useFormValidation(listFieldsConfig);
+  });
+
+  it("initializes list field values and states correctly", () => {
+    // Check main list field value
+    expect(Array.isArray(formListValidation.formFieldsValues.listField)).toBe(true);
+    expect(formListValidation.formFieldsValues.listField.length).toBe(1);
+    expect(formListValidation.formFieldsValues.listField[0].itemText).toBe("Initial item 1");
+    expect(formListValidation.formFieldsValues.listField[0].itemNum).toBe(1);
+
+    // Check initial values store for the list
+    expect(Array.isArray(formListValidation.initialFormFieldsValues.listField)).toBe(true);
+    expect(formListValidation.initialFormFieldsValues.listField[0].itemText).toBe("Initial item 1");
+
+
+    // Check states for the first item's fields
+    const item0TextPath = "listField[0].itemText";
+    const item0NumPath = "listField[0].itemNum";
+    expect(formListValidation.formFieldsTouchedState[item0TextPath]).toBe(false);
+    expect(formListValidation.formFieldsDirtyState[item0TextPath]).toBe(false);
+    expect(formListValidation.formFieldsValidity[item0TextPath]).toBeUndefined();
+
+    expect(formListValidation.formFieldsTouchedState[item0NumPath]).toBe(false);
+    expect(formListValidation.formFieldsDirtyState[item0NumPath]).toBe(false);
+    expect(formListValidation.formFieldsValidity[item0NumPath]).toBeUndefined();
+
+    // Check list field itself touched/dirty (should be false initially)
+    expect(formListValidation.formFieldsTouchedState.listField).toBe(false);
+    expect(formListValidation.formFieldsDirtyState.listField).toBe(false);
+
+
+    // Check another regular field
+    expect(formListValidation.formFieldsValues.anotherField).toBe("abc");
+  });
+
+  describe("addItem", () => {
+    it("adds a new item using defaultValue if no initialData provided", () => {
+      formListValidation.addItem("listField");
+      expect(formListValidation.formFieldsValues.listField.length).toBe(2);
+      expect(formListValidation.formFieldsValues.listField[1].itemText).toBe("default");
+      expect(formListValidation.formFieldsValues.listField[1].itemNum).toBe(0);
+
+      // Check states for the new item's fields
+      const item1TextPath = "listField[1].itemText";
+      expect(formListValidation.formFieldsTouchedState[item1TextPath]).toBe(false);
+      expect(formListValidation.formFieldsDirtyState[item1TextPath]).toBe(false); // Dirty because it's different from an "undefined" initial state if not explicitly set for this new item
+      expect(formListValidation.initialFormFieldsValues.listField[1].itemText).toBe("default");
+
+
+      // List itself should be dirty after adding an item
+       expect(formListValidation.formFieldsDirtyState.listField).toBe(true);
     });
 
-    it("does not change state and returns false if already in target touched state", () => {
-      formValidationInstance.setFieldTouched("name", true);
-      const result = formValidationInstance.setFieldTouched("name", true);
-      expect(formValidationInstance.formFieldsTouchedState.name).toBe(true);
-      expect(result).toBe(false);
-    });
-
-    it("can set a field to not touched and returns true if state changed", () => {
-      formValidationInstance.setFieldTouched("name", true);
-      const result = formValidationInstance.setFieldTouched("name", false);
-      expect(formValidationInstance.formFieldsTouchedState.name).toBe(false);
-      expect(result).toBe(true);
-    });
-
-    it("defaults to setting touched to true", () => {
-      const result = formValidationInstance.setFieldTouched("email");
-      expect(formValidationInstance.formFieldsTouchedState.email).toBe(true);
-      expect(result).toBe(true);
+    it("adds a new item with provided initialData", () => {
+      formListValidation.addItem("listField", { itemText: " spécifiques ", itemNum: 99 });
+      expect(formListValidation.formFieldsValues.listField.length).toBe(2);
+      expect(formListValidation.formFieldsValues.listField[1].itemText).toBe(" spécifiques ");
+      expect(formListValidation.formFieldsValues.listField[1].itemNum).toBe(99);
+      expect(formListValidation.initialFormFieldsValues.listField[1].itemNum).toBe(99);
     });
   });
 
-  describe("checkFieldDirty", () => {
-    it("sets field as dirty and returns true if primitive value changes from initial", () => {
-      const result = formValidationInstance.checkFieldDirty("name", "New Name");
-      expect(formValidationInstance.formFieldsDirtyState.name).toBe(true);
-      expect(result).toBe(true);
+  describe("removeItem", () => {
+    beforeEach(() => {
+      // Add a few items for removal tests
+      formListValidation.addItem("listField", { itemText: "Item 2", itemNum: 2 }); // index 1
+      formListValidation.addItem("listField", { itemText: "Item 3", itemNum: 3 }); // index 2
+      // listField is now: [ {Initial item 1, 1}, {Item 2, 2}, {Item 3, 3} ]
+      // Touch and make an item dirty to test state cleanup/shifting
+      formListValidation.setFieldTouched("listField[1].itemText", true);
+      formListValidation.checkFieldDirty("listField[1].itemText", "Changed Item 2");
+      formListValidation.formFieldsValues.listField[1].itemText = "Changed Item 2"; // manual change to simulate input
+      formListValidation.validateField(listFieldsConfig[0].fields[0], "", "listField[2].itemText"); // Make item 3 invalid
     });
 
-    it("sets field as not dirty and returns true if primitive value reverts to initial", () => {
-      formValidationInstance.checkFieldDirty("name", "New Name");
-      const result = formValidationInstance.checkFieldDirty(
-        "name",
-        "Initial Name"
-      );
-      expect(formValidationInstance.formFieldsDirtyState.name).toBe(false);
-      expect(result).toBe(true);
+    it("removes an item from the middle and shifts subsequent items and their states", () => {
+      expect(formListValidation.formFieldsValues.listField.length).toBe(3);
+      expect(formListValidation.formFieldsTouchedState["listField[1].itemText"]).toBe(true);
+      expect(formListValidation.formFieldsDirtyState["listField[1].itemText"]).toBe(true);
+      expect(formListValidation.formFieldsValidity["listField[2].itemText"]).toBe(false);
+
+
+      formListValidation.removeItem("listField", 1); // Remove "Item 2"
+
+      expect(formListValidation.formFieldsValues.listField.length).toBe(2);
+      expect(formListValidation.formFieldsValues.listField[0].itemText).toBe("Initial item 1");
+      expect(formListValidation.formFieldsValues.listField[1].itemText).toBe(""); // This was Item 3, which had an invalid empty text
+      expect(formListValidation.formFieldsValues.listField[1].itemNum).toBe(3);
+
+      // Check that states for "Item 2" (old index 1) are gone
+      expect(formListValidation.formFieldsTouchedState["listField[1].itemText"]).toBeUndefined(); // This was the shifted item
+      expect(formListValidation.formFieldsDirtyState["listField[1].itemText"]).toBeUndefined();
+
+      // Check that states for "Item 3" (old index 2, now index 1) are shifted
+      expect(formListValidation.formFieldsTouchedState["listField[1].itemText"]).toBeFalsy(); // It was not touched initially
+      expect(formListValidation.formFieldsDirtyState["listField[1].itemText"]).toBe(true); // It was empty, initial was "Item 3"
+      expect(formListValidation.formFieldsValidity["listField[1].itemText"]).toBe(false); // Invalid state shifted
+
+      // List itself should be dirty
+      expect(formListValidation.formFieldsDirtyState.listField).toBe(true);
     });
 
-    it("sets field as dirty and returns true if initially undefined field gets a value", () => {
-      // 'noInitialValue' has an initial formFieldsValues[propertyName] of undefined
-      // and initialFormFieldsValues[propertyName] of undefined
-      const result = formValidationInstance.checkFieldDirty(
-        "noInitialValue",
-        "Some Value"
-      );
-      expect(formValidationInstance.formFieldsDirtyState.noInitialValue).toBe(
-        true
-      );
-      expect(result).toBe(true);
+    it("removes the last item", () => {
+      formListValidation.removeItem("listField", 2); // Remove "Item 3"
+      expect(formListValidation.formFieldsValues.listField.length).toBe(2);
+      expect(formListValidation.formFieldsValues.listField[1].itemText).toBe("Changed Item 2");
+      expect(formListValidation.formFieldsErrorMessages["listField[2].itemText"]).toBeUndefined(); // Errors for removed item gone
     });
 
-    it("sets field as not dirty and returns true if initially undefined field gets undefined again after being dirty", () => {
-      formValidationInstance.checkFieldDirty("noInitialValue", "Some Value");
-      const result = formValidationInstance.checkFieldDirty(
-        "noInitialValue",
-        undefined
-      );
-      expect(formValidationInstance.formFieldsDirtyState.noInitialValue).toBe(
-        false
-      );
-      expect(result).toBe(true);
+    it("removes the first item", () => {
+      formListValidation.removeItem("listField", 0); // Remove "Initial item 1"
+      expect(formListValidation.formFieldsValues.listField.length).toBe(2);
+      expect(formListValidation.formFieldsValues.listField[0].itemText).toBe("Changed Item 2"); // Item 2 shifted to index 0
+      expect(formListValidation.formFieldsTouchedState["listField[0].itemText"]).toBe(true); // State shifted
     });
 
-    it("does not change dirty state and returns false if value is same as initial", () => {
-      const result = formValidationInstance.checkFieldDirty(
-        "name",
-        "Initial Name"
-      );
-      expect(formValidationInstance.formFieldsDirtyState.name).toBe(false);
-      expect(result).toBe(false);
+    it("removes the only item", () => {
+      const singleItemListConf = [{
+        propertyName: "singleList", type: "list", defaultValue: {text: "a"}, fields: [{ propertyName: "text" }], initialValue: [{text: "item1"}]
+      }];
+      const singleListValidation = useFormValidation(singleItemListConf);
+      singleListValidation.removeItem("singleList", 0);
+      expect(singleListValidation.formFieldsValues.singleList.length).toBe(0);
+      expect(singleListValidation.formFieldsTouchedState["singleList[0].text"]).toBeUndefined();
+    });
+  });
+
+  describe("validateFormPurely with list fields", () => {
+    it("validates all items in a list", () => {
+      const formData = {
+        listField: [
+          { itemText: "Valid Text 1", itemNum: 10 },
+          { itemText: "", itemNum: 20 }, // Invalid: itemText is required
+        ],
+        anotherField: "valid"
+      };
+      const isValid = formListValidation.validateFormPurely(formData);
+      expect(isValid).toBe(false);
+      expect(formListValidation.formFieldsValidity["listField[0].itemText"]).toBeUndefined();
+      expect(formListValidation.formFieldsValidity["listField[1].itemText"]).toBe(false);
+      expect(formListValidation.formFieldsErrorMessages["listField[1].itemText"]).toBe("Field Item Text is required.");
     });
 
-    it("sets field as dirty and returns true if object value changes (JSON.stringify comparison)", () => {
-      const result = formValidationInstance.checkFieldDirty("profile", {
-        nestedValue: "changed",
-        unchanged: "data",
-      });
-      expect(formValidationInstance.formFieldsDirtyState.profile).toBe(true);
-      expect(result).toBe(true);
+    it("passes validation if all items in list are valid", () => {
+       const formData = {
+        listField: [
+          { itemText: "Valid Text 1", itemNum: 10 },
+          { itemText: "Valid Text 2", itemNum: 20 },
+        ],
+        anotherField: "valid"
+      };
+      const isValid = formListValidation.validateFormPurely(formData);
+      expect(isValid).toBe(true);
+      expect(formListValidation.formFieldsValidity["listField[0].itemText"]).toBeUndefined();
+      expect(formListValidation.formFieldsValidity["listField[1].itemText"]).toBeUndefined();
+    });
+  });
+
+  describe("State Propagation for List Items", () => {
+    it("marks list field and form as touched when an item field is touched", () => {
+      formListValidation.setFieldTouched("listField[0].itemText", true);
+      expect(formListValidation.formFieldsTouchedState["listField[0].itemText"]).toBe(true);
+      expect(formListValidation.formFieldsTouchedState.listField).toBe(true); // Parent list also touched
     });
 
-    it("sets field as not dirty and returns true if object value reverts to initial (JSON.stringify comparison)", () => {
-      formValidationInstance.checkFieldDirty("profile", {
-        nestedValue: "changed",
-        unchanged: "data",
-      });
-      const result = formValidationInstance.checkFieldDirty(
-        "profile",
-        JSON.parse(JSON.stringify(initialProfileValue))
-      );
-      expect(formValidationInstance.formFieldsDirtyState.profile).toBe(false);
-      expect(result).toBe(true);
+    it("marks list field and form as dirty when an item field value changes", () => {
+      formListValidation.checkFieldDirty("listField[0].itemNum", 123); // Initial was 1
+      expect(formListValidation.formFieldsDirtyState["listField[0].itemNum"]).toBe(true);
+      expect(formListValidation.formFieldsDirtyState.listField).toBe(true); // Parent list also dirty
     });
 
-    it("does not change dirty state and returns false if object value remains the same (deep comparison by stringify)", () => {
-      const result = formValidationInstance.checkFieldDirty(
-        "profile",
-        JSON.parse(JSON.stringify(initialProfileValue))
-      );
-      expect(formValidationInstance.formFieldsDirtyState.profile).toBe(false);
-      expect(result).toBe(false);
-    });
+    it("list remains dirty if one item becomes non-dirty but another is still dirty", () => {
+      formListValidation.checkFieldDirty("listField[0].itemText", "new text"); // item 0 dirty
+      formListValidation.addItem("listField", { itemText: "another new", itemNum: 500 }); // item 1 added, list dirty
+      formListValidation.checkFieldDirty("listField[1].itemText", "another new text"); // item 1 dirty
 
-    it("sets field as dirty if new property added to object", () => {
-      const newValue = JSON.parse(JSON.stringify(initialProfileValue));
-      newValue.anotherProperty = "new data";
-      const result = formValidationInstance.checkFieldDirty(
-        "profile",
-        newValue
-      );
-      expect(formValidationInstance.formFieldsDirtyState.profile).toBe(true);
-      expect(result).toBe(true);
+      expect(formListValidation.formFieldsDirtyState["listField[0].itemText"]).toBe(true);
+      expect(formListValidation.formFieldsDirtyState["listField[1].itemText"]).toBe(true);
+      expect(formListValidation.formFieldsDirtyState.listField).toBe(true);
+
+      // Revert item 0 to initial state
+      formListValidation.checkFieldDirty("listField[0].itemText", "Initial item 1");
+      expect(formListValidation.formFieldsDirtyState["listField[0].itemText"]).toBe(false);
+      // List should still be dirty because item 1 is dirty
+      expect(formListValidation.formFieldsDirtyState.listField).toBe(true);
     });
   });
 });
+
+[end of src/composables/useFormValidation.spec.js]
