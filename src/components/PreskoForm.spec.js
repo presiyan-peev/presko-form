@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
-import { nextTick, defineComponent, reactive } from "vue";
+import { nextTick, defineComponent, reactive, ref } from "vue";
 import PreskoForm from "./PreskoForm.vue";
 // Assuming stubs are in src/__tests__/stubs/ as per typical project structure
 // For PreskoForm.spec.js, we might not need the actual stubs from files if we define simple ones locally or use Teleport for complex children.
@@ -567,6 +567,87 @@ describe("PreskoForm.vue", () => {
           (event) => event[0].propertyName === "profile.firstName"
         )
       ).toBe(true);
+    });
+  });
+
+  describe("Field Visibility with isShowing", () => {
+    it("should render a field when isShowing is true", () => {
+      const wrapper = createWrapper({
+        fields: [
+          {
+            propertyName: "visibleField",
+            component: LocalStubInput,
+            isShowing: true,
+          },
+        ],
+      });
+      expect(wrapper.findComponent(LocalStubInput).exists()).toBe(true);
+    });
+
+    it("should not render a field when isShowing is false", () => {
+      const wrapper = createWrapper({
+        fields: [
+          {
+            propertyName: "hiddenField",
+            component: LocalStubInput,
+            isShowing: false,
+          },
+        ],
+      });
+      expect(wrapper.findComponent(LocalStubInput).exists()).toBe(false);
+    });
+
+    it("should update field visibility when isShowing changes", async () => {
+      const isShowingRef = ref(true);
+      const wrapper = createWrapper({
+        fields: [
+          {
+            propertyName: "dynamicField",
+            component: LocalStubInput,
+            isShowing: isShowingRef,
+          },
+        ],
+      });
+
+      expect(wrapper.findComponent(LocalStubInput).exists()).toBe(true);
+
+      isShowingRef.value = false;
+      await nextTick();
+
+      expect(wrapper.findComponent(LocalStubInput).exists()).toBe(false);
+
+      isShowingRef.value = true;
+      await nextTick();
+
+      expect(wrapper.findComponent(LocalStubInput).exists()).toBe(true);
+    });
+
+    it("should not include hidden fields in form submission", async () => {
+      const wrapper = createWrapper(
+        {
+          fields: [
+            {
+              propertyName: "hiddenField",
+              component: LocalStubInput,
+              isShowing: false,
+            },
+            {
+              propertyName: "visibleField",
+              component: LocalStubInput,
+              isShowing: true,
+            },
+          ],
+        },
+        { visibleField: "Visible" }
+      );
+
+      await wrapper.find("form").trigger("submit.prevent");
+      await nextTick();
+
+      expect(wrapper.emitted()["submit"]).toBeTruthy();
+      const submittedData = wrapper.emitted()["submit"][0][0];
+      expect(submittedData).toEqual({ visibleField: "Visible" });
+      expect(submittedData.hiddenField).toBeUndefined();
     });
   });
 });
