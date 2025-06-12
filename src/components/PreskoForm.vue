@@ -738,9 +738,9 @@ const handleListItemFieldBlurred = (listName, itemIndex, itemFieldName) => {
 
 // Expose methods for parent components, e.g., for programmatic submission.
 defineExpose({
-  handleFormSubmit,
-  handleAddItem,
-  handleRemoveItem,
+  submit: handleFormSubmit,
+  addItem: handleAddItem,
+  removeItem: handleRemoveItem,
 });
 </script>
 

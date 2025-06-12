@@ -47,6 +47,7 @@ import Validation from "../validation";
  * @param {Array<FieldConfig>} fields - An array of field configuration objects that define the form structure.
  *   Each object describes a field, a sub-form container, or a list field.
  * @param {UseFormValidationOptions} [options] - Options to configure validation behavior, such as trigger type and debounce time.
+ * @param {Object} [initialModelFromParent=null] - Optional initial model values passed from the parent component.
  * @returns {Object} An object containing reactive states for form data and validation, along with methods to manage the form.
  * @property {Object<string, any>} formFieldsValues - Reactive object intended to hold the current values of form fields.
  *   Note: In integration with `PreskoForm`, the primary model is managed by `PreskoForm`'s `v-model`. This internal state
@@ -74,7 +75,7 @@ import Validation from "../validation";
  * @property {Function} addItem - Adds an item to a list field.
  * @property {Function} removeItem - Removes an item from a list field.
  */
-export function useFormValidation(fields, options = {}) {
+export function useFormValidation(fields, options = {}, initialModelFromParent = null) {
   const { validationTrigger = "onBlur", inputDebounceMs = 100 } = options;
 
   /** @type {Object<string, any>} */
@@ -1120,6 +1121,37 @@ export function useFormValidation(fields, options = {}) {
   // Use the reactive formFieldsValues for the first visibility evaluation
   // to ensure consistency with how the watcher will evaluate later.
   // And pass it as the rootModelForConditionEvaluation as well.
+
+  // Helper function for deep merging initialModelFromParent into form state objects
+  const deepMergeObjects = (target, source) => {
+    if (!source || typeof source !== 'object') {
+      return; // Only merge if source is an object
+    }
+    for (const key of Object.keys(source)) {
+      const sourceVal = source[key];
+      const targetVal = target[key];
+
+      if (typeof sourceVal === 'object' && sourceVal !== null && !Array.isArray(sourceVal)) {
+        // If sourceVal is an object (and not an array), deep merge
+        if (typeof targetVal !== 'object' || targetVal === null || Array.isArray(targetVal)) {
+          target[key] = {}; // Ensure target key is an object
+        }
+        deepMergeObjects(target[key], sourceVal);
+      } else if (Array.isArray(sourceVal)) {
+        // If sourceVal is an array, deep clone and replace
+        target[key] = JSON.parse(JSON.stringify(sourceVal));
+      } else {
+        // Primitive values, assign directly
+        target[key] = sourceVal;
+      }
+    }
+  };
+
+  if (initialModelFromParent) {
+    deepMergeObjects(formFieldsValues, initialModelFromParent);
+    deepMergeObjects(initialFormFieldsValues, initialModelFromParent); // Also update baseline for dirty checking
+  }
+
   initializeAllVisibilities(fields, "", formFieldsValues, formFieldsValues);
 
 
