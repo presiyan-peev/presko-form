@@ -14,6 +14,7 @@ import Validation from "../validation";
  * @property {string} [type] - Type of field, e.g., 'list' for list fields.
  * @property {Array} [initialValue] - Initial value for list fields.
  * @property {Object} [defaultValue] - Default value template for new list items.
+ * @property {boolean} [isShowing] - Indicates whether the field is visible and should be validated.
  */
 
 /**
@@ -485,9 +486,9 @@ export function useFormValidation(fields, options = {}) {
    */
   const validateField = (fieldPath, input) => {
     const fieldConfig = findFieldConfig(fieldPath, fields);
-    if (!fieldConfig) {
-      console.warn(`Field configuration not found for path: ${fieldPath}`);
-      return true; // Assume valid if no config found
+    if (!fieldConfig || fieldConfig.isShowing === false) {
+      // Skip validation if the field is not configured or not visible
+      return;
     }
 
     // Validate with custom validators first
@@ -532,6 +533,11 @@ export function useFormValidation(fields, options = {}) {
     let allValid = true;
 
     currentFieldsConfig.forEach((field) => {
+      const fullPath = pathPrefix + field.propertyName;
+      if (field.isShowing === false) {
+        // Skip validation for fields that are not visible
+        return;
+      }
       const key = field.propertyName || field.subForm;
       if (!key) return;
 
@@ -570,7 +576,6 @@ export function useFormValidation(fields, options = {}) {
         }
       } else if (field.propertyName) {
         // Validate regular field
-        const fullPath = pathPrefix + field.propertyName;
         const fieldValue = formToValidate[field.propertyName];
         if (!validateField(fullPath, fieldValue)) {
           allValid = false;

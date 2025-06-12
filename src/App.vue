@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive } from "vue";
+import { computed, ref, reactive } from "vue";
 import PreskoForm from "./components/PreskoForm.vue";
 // Assuming AppInput and AppSubmit are globally registered or imported elsewhere if not standard HTML
 // For this example, let's assume they are simple custom components.
@@ -8,6 +8,7 @@ import PreskoForm from "./components/PreskoForm.vue";
 // import AppSubmit from './test-components/AppSubmit.vue';
 
 const preskoFormRef = ref(null);
+const showFeedback = ref(true);
 
 const fieldsConfig = ref([
   {
@@ -34,15 +35,18 @@ const fieldsConfig = ref([
     propertyName: "attendees",
     label: "Attendees", // Label for the whole list section
     itemLabel: "Attendee", // Used for "Add Attendee" button
-    defaultValue: { // Default values for a new item when added
+    defaultValue: {
+      // Default values for a new item when added
       name: "",
       email: "",
       ticketType: "general",
-      contact: { // Example of nested object within a list item
-        phone: ""
-      }
+      contact: {
+        // Example of nested object within a list item
+        phone: "",
+      },
     },
-    fields: [ // Field definitions for each item in the list
+    fields: [
+      // Field definitions for each item in the list
       {
         propertyName: "name",
         component: "AppInput",
@@ -68,7 +72,8 @@ const fieldsConfig = ref([
         rules: ["required"],
         props: {
           label: "Ticket Type",
-          options: [ // Example options for a select
+          options: [
+            // Example options for a select
             { value: "general", text: "General Admission" },
             { value: "vip", text: "VIP Pass" },
             { value: "student", text: "Student" },
@@ -85,25 +90,6 @@ const fieldsConfig = ref([
         // The `useFormValidation` supports paths like `attendees[0].contact.phone`.
         // We'll assume AppInput can take a `name` prop that reflects this full path for now,
         // or that PreskoFormItem correctly constructs it.
-        propertyName: "contact",
-        // This could also be a "sub-group" of fields if PreskoForm supported that concept within items.
-        // For now, let's assume `contact` is an object with properties.
-        // To make it simpler for direct PreskoFormItem rendering, we'd typically flatten this
-        // or have a custom component for 'contact'.
-        // Let's try with a direct field for phone for now for simplicity with AppInput
-        // propertyName: "contact.phone", // This would be ideal if AppInput could handle it directly
-        // For now, let's make 'contact' an object and 'phone' a field within it.
-        // The component would need to handle modelValue for `contact.phone`.
-        // For this example, let's define `phone` directly under `contact` for clarity in the `modelValue`
-        // and assume the rendering part can handle it.
-        // PreskoForm itself doesn't have a "group" type for items, only "list" or "subForm".
-        // So, `contact` will be an object, and its fields will be managed by their own `PreskoFormItem`s
-        // if we were to expand on this.
-        // For this example, let's simplify and put phone directly.
-        // Re-evaluating: The PRD and implementation made list items like mini-forms.
-        // So, `attendees[0].contact.phone` should work.
-        // We'll make `contact` an object with a `phone` field inside the list item's `fields` array.
-        // This means we need a mechanism to render this.
         // The current PreskoForm list rendering iterates over `field.fields` for `PreskoFormItem`.
         // It does not inherently support rendering "field groups" within items unless `PreskoFormItem` itself
         // can take a complex field definition.
@@ -153,26 +139,38 @@ const fieldsConfig = ref([
           label: "Subscribe to Newsletter",
         },
         value: true, // Default value for the checkbox
-      }
+      },
     ],
   },
   {
     propertyName: "feedback",
-    component: "AppTextarea", // Assuming a custom textarea component
+    component: "AppInput", // Assuming a custom textarea component
+    isShowing: showFeedback, // Example of using isShowing
     props: {
-      label: "Feedback (Optional)",
-      rows: 3
-    }
-  }
+      label: "Feedback (You can hide this field)",
+    },
+  },
 ]);
 
 // Initial form data
 const formData = reactive({
   eventName: "PreskoForm Demo Launch",
-  eventDate: new Date().toISOString().split('T')[0], // Today's date
+  eventDate: new Date().toISOString().split("T")[0], // Today's date
   attendees: [
-    { name: "Alice Wonderland", email: "alice@example.com", ticketType: "vip", department: "Marketing", sendNewsletter: true },
-    { name: "Bob The Builder", email: "bob@example.com", ticketType: "general", department: "Engineering", sendNewsletter: false },
+    {
+      name: "Alice Wonderland",
+      email: "alice@example.com",
+      ticketType: "vip",
+      department: "Marketing",
+      sendNewsletter: true,
+    },
+    {
+      name: "Bob The Builder",
+      email: "bob@example.com",
+      ticketType: "general",
+      department: "Engineering",
+      sendNewsletter: false,
+    },
   ],
   feedback: "",
 });
@@ -193,7 +191,7 @@ function addAttendee() {
     // preskoFormRef.value.addItem('attendees', { name: 'New Attendee', email: 'new@example.com', ticketType: 'general', sendNewsletter: true });
     // The addItem PRD specified it would use the list's `defaultValue` if no specific data is passed.
     // The `handleAddItem` in PreskoForm.vue now constructs this default value.
-    preskoFormRef.value.addItem('attendees');
+    preskoFormRef.value.addItem("attendees");
   }
 }
 </script>
@@ -221,7 +219,13 @@ function addAttendee() {
     </PreskoForm>
 
     <!-- This button is outside the form, shows how to call exposed methods -->
-    <button type="button" @click="addAttendee" class="external-add-button">Add Attendee Programmatically</button>
+    <button type="button" @click="addAttendee" class="external-add-button">
+      Add Attendee Programmatically
+    </button>
+
+    <button type="button" @click="showFeedback = !showFeedback">
+      Toggle Feedback
+    </button>
 
     <div class="form-data-display">
       <h3>Current Form Data (formData):</h3>
@@ -248,7 +252,8 @@ body {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
-h1, h2 {
+h1,
+h2 {
   color: #2c3e50;
   text-align: center;
   margin-bottom: 20px;
@@ -286,7 +291,7 @@ input:invalid {
 }
 
 .external-add-button {
-  background-color: #4CAF50; /* Green */
+  background-color: #4caf50; /* Green */
   border: none;
   color: white;
   padding: 10px 20px;
@@ -337,10 +342,10 @@ input:invalid {
   background-color: #fff;
 }
 
-.presko-list-item-fields > div { /* Assuming PreskoFormItem renders in a div */
+.presko-list-item-fields > div {
+  /* Assuming PreskoFormItem renders in a div */
   margin-bottom: 8px;
 }
-
 
 .presko-list-add-btn,
 .presko-list-remove-btn {
@@ -352,11 +357,11 @@ input:invalid {
 }
 
 .presko-list-add-btn {
-  background-color: #2196F3;
+  background-color: #2196f3;
   color: white;
 }
 .presko-list-add-btn:hover {
-  background-color: #1976D2;
+  background-color: #1976d2;
 }
 
 .presko-list-remove-btn {
@@ -365,12 +370,17 @@ input:invalid {
   margin-top: 10px; /* Give it some space if fields are many */
 }
 .presko-list-remove-btn:hover {
-  background-color: #D32F2F;
+  background-color: #d32f2f;
 }
 
 /* Assuming AppInput, AppSelect, AppCheckbox, AppTextarea are simple components */
 /* For a real app, these would have more specific styling */
-input[type="text"], input[type="email"], input[type="date"], input[type="password"], select, textarea {
+input[type="text"],
+input[type="email"],
+input[type="date"],
+input[type="password"],
+select,
+textarea {
   width: calc(100% - 22px); /* Full width minus padding and border */
   padding: 10px;
   margin-bottom: 5px; /* Space for error message */
@@ -383,18 +393,19 @@ label {
   margin-bottom: 5px;
   font-weight: bold;
 }
-.app-checkbox-label { /* For AppCheckbox */
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: normal;
+.app-checkbox-label {
+  /* For AppCheckbox */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: normal;
 }
 
 /* Error message styling - PreskoFormItem will need to render errors in a span/div */
-.presko-form-item .error-message { /* Assuming PreskoFormItem has a class for error messages */
+.presko-form-item .error-message {
+  /* Assuming PreskoFormItem has a class for error messages */
   color: red;
   font-size: 0.8em;
   margin-top: 4px;
 }
-
 </style>
