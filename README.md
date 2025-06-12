@@ -897,6 +897,8 @@ The `isShowing` property is a Boolean that determines whether a form field is vi
 Here's how you can use the `isShowing` property in your form configuration:
 
 ```javascript
+const isShowingOtherReason = ref(true);
+
 const formFields = ref([
   {
     propertyName: "reason",
@@ -909,20 +911,15 @@ const formFields = ref([
   {
     propertyName: "otherReason",
     component: "AppInput",
-    isShowing: customLogicForOtherReason(), // Custom logic to determine visibility
+    isShowing: isShowingOtherReason, // Bind to a Ref or a Computed
     props: {
       label: "Please specify other reason",
     },
   },
 ]);
-
-function customLogicForOtherReason() {
-  // Example logic to determine if 'otherReason' should be shown
-  return someConditionMet();
-}
 ```
 
-In this example, the `otherReason` field is only shown if `customLogicForOtherReason()` returns `true`. This allows developers to create dynamic forms that adapt to user input.
+In this example, the `otherReason` field is shown or hidden based on the value of `isShowingOtherReason`. You can bind `isShowing` to any Ref, including a computed property, to dynamically control field visibility.
 
 ### Note
 
