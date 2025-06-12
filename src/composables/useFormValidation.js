@@ -127,7 +127,13 @@ export function useFormValidation(fields, options = {}) {
       ? fieldConfig.value
       : undefined;
 
-    targetValuesObject[fieldConfig.propertyName] = initialValue;
+    // Ensure deep clone for objects/arrays when setting on formFieldsValues (targetValuesObject)
+    if (typeof initialValue === 'object' && initialValue !== null) {
+      targetValuesObject[fieldConfig.propertyName] = JSON.parse(JSON.stringify(initialValue));
+    } else {
+      targetValuesObject[fieldConfig.propertyName] = initialValue;
+    }
+    // targetInitialValuesObject already uses deep clone
     targetInitialValuesObject[fieldConfig.propertyName] =
       initialValue !== undefined
         ? JSON.parse(JSON.stringify(initialValue))
@@ -165,7 +171,7 @@ export function useFormValidation(fields, options = {}) {
         if (field.type === "list") {
           currentModelTarget[key] =
             field.initialValue && Array.isArray(field.initialValue)
-              ? [...field.initialValue]
+              ? JSON.parse(JSON.stringify(field.initialValue)) // Deep clone for formFieldsValues
               : [];
           currentInitialValuesTarget[key] =
             field.initialValue && Array.isArray(field.initialValue)
@@ -235,13 +241,24 @@ export function useFormValidation(fields, options = {}) {
 
           // Register dependencies for conditional fields
           if (field.condition && Array.isArray(field.condition.rules)) {
+            const fieldBasePath = getBasePath(fullPath);
             field.condition.rules.forEach(rule => {
               if (rule.field) {
-                if (!fieldDependencies[rule.field]) {
-                  fieldDependencies[rule.field] = [];
+                let sourcePathKey = rule.field;
+                // If rule.field is simple and fieldBasePath exists, resolve it
+                if (!rule.field.includes('.') && !rule.field.includes('[') && fieldBasePath) {
+                  sourcePathKey = fieldBasePath + rule.field;
+                  // TODO: Consider if a global fallback for sourcePathKey definition is needed here too,
+                  // similar to evaluateFieldVisibility. For now, assume relative paths are intended to be within the same basePath.
+                  // If a global var with same simple name is also a dependency, it needs separate explicit rule.
                 }
-                if (!fieldDependencies[rule.field].includes(fullPath)) {
-                  fieldDependencies[rule.field].push(fullPath);
+                // else, rule.field is already absolute or global-like
+
+                if (!fieldDependencies[sourcePathKey]) {
+                  fieldDependencies[sourcePathKey] = [];
+                }
+                if (!fieldDependencies[sourcePathKey].includes(fullPath)) {
+                  fieldDependencies[sourcePathKey].push(fullPath);
                 }
               }
             });
@@ -326,7 +343,15 @@ export function useFormValidation(fields, options = {}) {
       current = current[key];
     }
     if (parts.length > 0) {
-        current[parts[parts.length - 1]] = value;
+        const finalKey = parts[parts.length - 1];
+        if (Array.isArray(current[finalKey]) && Array.isArray(value) && value.length === 0) {
+            current[finalKey].length = 0; // Clear existing array proxy in place
+            // Optionally, if current[finalKey] should become a new empty array reference:
+            // current[finalKey] = [];
+            // But modifying length is often better for reactivity on existing array proxies.
+        } else {
+            current[finalKey] = value;
+        }
     }
   };
 
@@ -374,12 +399,21 @@ export function useFormValidation(fields, options = {}) {
 
         if (field.type === 'list' && fieldPath.startsWith(fullPath + '[')) {
             // Path is like 'myList[0].subField'
-            // We need to find the config for 'subField' within 'myList.fields'
-            const subPathMatch = fieldPath.match(/^[^.]+\.(.+)$/); // Get 'subField'
-            if (subPathMatch && field.fields) {
-                return findFieldConfig(subPathMatch[1], field.fields); // Search for 'subField' in list item's fields
+            const listItemPathMatch = fieldPath.match(/\[\d+\]\.(.+)$/); // e.g., from "list[0].child" gets "child"
+            if (listItemPathMatch && field.fields) {
+                const childFieldName = listItemPathMatch[1];
+                // Search for 'childFieldName' in the list item's field definitions
+                const foundChild = findFieldConfig(childFieldName, field.fields);
+                if (foundChild) return foundChild;
             }
-            return field; // Return the list field itself if path is just 'myList[0]'
+            // If we're looking for the list itself (e.g. path is 'myList' or 'myList[0]' without further children specified for config lookup)
+            // and fullPath matches fieldPath, it would have been caught by the `if (fullPath === fieldPath)` above.
+            // This branch means fieldPath is like 'myList[0]' and we didn't find a specific child config,
+            // or it's 'myList[0].nonExistentChild'. In this context, returning the list field 'field' itself might be problematic
+            // if the caller expects a child's config.
+            // However, if fieldPath is 'myList[0]', and that's what we are looking for, it should have matched earlier.
+            // This part of logic implies we are trying to resolve a child of a list item.
+            return null; // More accurate: if specific child not found, return null.
         }
 
         if (field.subForm && field.fields && fieldPath.startsWith(fullPath + '.')) {
@@ -882,6 +916,22 @@ export function useFormValidation(fields, options = {}) {
   // --- Conditional Logic Implementation ---
 
   /**
+   * Extracts the base path from a field path.
+   * e.g., 'a.b.c[0].d' -> 'a.b.c[0].'
+   * e.g., 'topLevel' -> ''
+   * @private
+   * @param {string} fieldPath - The full path of the field.
+   * @returns {string} The base path, ending with a dot if not empty.
+   */
+  const getBasePath = (fieldPath) => {
+    const lastDotIndex = fieldPath.lastIndexOf('.');
+    if (lastDotIndex === -1) {
+      return ""; // Top-level field, no base path
+    }
+    return fieldPath.substring(0, lastDotIndex + 1); // Include the trailing dot
+  };
+
+  /**
    * Evaluates a single condition rule.
    * @private
    * @param {ConditionRule} rule - The condition rule to evaluate.
@@ -932,14 +982,29 @@ export function useFormValidation(fields, options = {}) {
     }
 
     const { rules, logic = 'AND' } = fieldConfig.condition;
+    const basePath = getBasePath(fieldPathToEvaluate);
     let overallResult = logic === 'AND';
 
     for (const rule of rules) {
-      // Resolve source field path: could be relative to a list item or absolute.
-      // This is a complex part. For now, assume rule.field is resolvable from the root model.
-      // True robust relative path resolution (e.g., '../../otherField' or 'currentItem.anotherProp')
-      // would require passing more context or a more sophisticated path resolution mechanism.
-      const sourceValue = getValueByPath(currentFormModel, rule.field);
+      let sourceValue;
+      const conditionSourcePath = rule.field;
+
+      if (conditionSourcePath.includes('.') || conditionSourcePath.includes('[')) {
+        // Absolute-like path, resolve from root
+        sourceValue = getValueByPath(currentFormModel, conditionSourcePath);
+      } else {
+        // Simple path (e.g., 'siblingField')
+        if (basePath) {
+          // Try relative path first if a basePath exists
+          sourceValue = getValueByPath(currentFormModel, basePath + conditionSourcePath);
+        }
+
+        // If not found via relative path (or if no basePath), try as a global path
+        if (sourceValue === undefined) {
+          sourceValue = getValueByPath(currentFormModel, conditionSourcePath);
+        }
+      }
+
       const ruleResult = evaluateConditionRule(rule, sourceValue);
 
       if (logic === 'AND') {
@@ -980,10 +1045,16 @@ export function useFormValidation(fields, options = {}) {
 
       if (fieldConfig.clearValueOnHide) {
         // Determine appropriate empty/initial value
-        let resetValue = undefined;
-        if (fieldConfig.type === 'list') resetValue = [];
-        else if (fieldConfig.fields) resetValue = {}; // for sub-forms
-        else if (fieldConfig.hasOwnProperty('value')) resetValue = JSON.parse(JSON.stringify(fieldConfig.value)); // initial value from config
+        let resetValue = undefined; // Default reset value
+        if (fieldConfig.type === 'list') {
+          resetValue = [];
+        } else if (fieldConfig.fields) { // It's a sub-form object
+          resetValue = {};
+        }
+        // For simple fields, 'undefined' is the default reset.
+        // The PRD mentioned "or its initial value if defined" - this part is being removed for clearer "clearing".
+        // If a field needs to reset to a specific initial value rather than undefined,
+        // that could be a separate feature or configuration like `resetToInitialValueOnHide`.
 
         setValueByPath(formFieldsValues, fieldPath, resetValue); // Update internal model
         // Note: Propagating this change to the parent component's v-model is complex.
@@ -1018,25 +1089,27 @@ export function useFormValidation(fields, options = {}) {
   };
 
   // Initialize all field visibilities after states and dependencies are built
-  const initializeAllVisibilities = (currentFields, pathPrefix = "", model) => {
+  const initializeAllVisibilities = (currentFields, pathPrefix = "", currentScopedModel, rootModelForConditionEvaluation) => {
     currentFields.forEach(field => {
       const key = field.propertyName || field.subForm;
       if (!key) return;
       const fullPath = pathPrefix + key;
 
       if (field.condition) {
-        updateFieldVisibility(fullPath, model);
+        // ALWAYS use rootModelForConditionEvaluation for evaluating visibility conditions
+        updateFieldVisibility(fullPath, rootModelForConditionEvaluation);
       }
 
       if (field.subForm && field.fields) {
-        const subModel = getValueByPath(model, key) || {};
-        initializeAllVisibilities(field.fields, `${fullPath}.`, subModel);
+        const subModel = getValueByPath(currentScopedModel, key) || {};
+        // Pass currentScopedModel's relevant part for further recursion, but keep passing rootModelForConditionEvaluation
+        initializeAllVisibilities(field.fields, `${fullPath}.`, subModel, rootModelForConditionEvaluation);
       } else if (field.type === 'list' && field.fields) {
-        const listItems = getValueByPath(model, key) || [];
+        const listItems = getValueByPath(currentScopedModel, key) || [];
         listItems.forEach((item, index) => {
           const itemPathPrefix = `${fullPath}[${index}].`;
-          const itemModel = item || {};
-          initializeAllVisibilities(field.fields, itemPathPrefix, itemModel); // Pass item as model for its fields
+          const itemModel = item || {}; // itemModel here is for traversing the list structure
+          initializeAllVisibilities(field.fields, itemPathPrefix, itemModel, rootModelForConditionEvaluation);
         });
       }
     });
@@ -1044,9 +1117,10 @@ export function useFormValidation(fields, options = {}) {
 
   // Initial setup
   initFormStates(fields); // Sets up states, including default visibility and dependency map
-  // Use a deep copy of initialFormFieldsValues for the first visibility evaluation,
-  // as formFieldsValues might not be fully populated if parent provides model later.
-  initializeAllVisibilities(fields, "", JSON.parse(JSON.stringify(initialFormFieldsValues)));
+  // Use the reactive formFieldsValues for the first visibility evaluation
+  // to ensure consistency with how the watcher will evaluate later.
+  // And pass it as the rootModelForConditionEvaluation as well.
+  initializeAllVisibilities(fields, "", formFieldsValues, formFieldsValues);
 
 
   // Watch for changes in any field value that is a source dependency
@@ -1058,18 +1132,34 @@ export function useFormValidation(fields, options = {}) {
 
   // This watch might be too broad. Consider making it more specific or integrating updates
   // into where field values are known to change (e.g., after `triggerValidation` or direct `formFieldsValues` mutation).
-  watch(formFieldsValues, (newModel, oldModel) => {
-    // Iterate over all source fields in the dependency map
-    Object.keys(fieldDependencies).forEach(sourceFieldPath => {
-        const newValue = getValueByPath(newModel, sourceFieldPath);
-        const oldValue = getValueByPath(oldModel, sourceFieldPath);
+  watch(formFieldsValues, (newModel /*, oldModel */) => {
+    // Re-evaluate all fields that have conditions. This is less efficient than precise dependency tracking
+    // but can help overcome issues with complex change detection in the watcher.
+    const reevaluateRecursive = (configFields, prefix, modelToUse) => {
+        configFields.forEach(fieldConfig => {
+            const key = fieldConfig.propertyName || fieldConfig.subForm;
+            if (!key) return;
+            const currentFullPath = prefix + key;
 
-        if (JSON.stringify(newValue) !== JSON.stringify(oldValue)) { // Basic change detection
-            fieldDependencies[sourceFieldPath].forEach(dependentFieldPath => {
-                updateFieldVisibility(dependentFieldPath, newModel);
-            });
-        }
-    });
+            if (fieldConfig.condition && fieldConfig.condition.rules && fieldConfig.condition.rules.length > 0) {
+                updateFieldVisibility(currentFullPath, modelToUse);
+            }
+
+            if (fieldConfig.subForm && fieldConfig.fields) {
+                reevaluateRecursive(fieldConfig.fields, `${currentFullPath}.`, modelToUse);
+            } else if (fieldConfig.type === 'list' && fieldConfig.fields) {
+                const listItems = getValueByPath(modelToUse, currentFullPath) || [];
+                listItems.forEach((item, index) => {
+                    // For children of list items, their full path includes the index
+                    // and their conditions are evaluated against the root modelToUse.
+                    // The field configs (fieldConfig.fields) are for properties *within* each item.
+                    reevaluateRecursive(fieldConfig.fields, `${currentFullPath}[${index}].`, modelToUse);
+                });
+            }
+        });
+    };
+    reevaluateRecursive(fields, "", newModel);
+
   }, { deep: true });
 
 

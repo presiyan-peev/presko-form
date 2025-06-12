@@ -541,4 +541,52 @@ describe('useFormValidation - Conditional Fields', () => {
     vi.restoreAllMocks(); // Restore any mocks
     vi.useRealTimers(); // Restore real timers
   });
+
+  describe('8. Bug Demonstration: Conditional fields in list items with relative paths', () => {
+    it('should FAIL to correctly evaluate conditional field based on "relative" path within a list item (demonstrates bug)', async () => {
+      fields = [
+        { propertyName: 'globalSwitch', value: false },
+        {
+          propertyName: 'itemsList',
+          type: 'list',
+          initialValue: [
+            { itemSwitch: false, conditionalDetails: 'hidden text', globalDependentDetails: 'more hidden text' }
+          ],
+          fields: [
+            { propertyName: 'itemSwitch' },
+            {
+              propertyName: 'conditionalDetails',
+              // BUG: This 'itemSwitch' is treated as 'root.itemSwitch', not 'itemsList[0].itemSwitch'
+              condition: { rules: [{ field: 'itemSwitch', operator: 'equals', value: true }] }
+            },
+            {
+              propertyName: 'globalDependentDetails',
+              // This should work because 'globalSwitch' is a root path
+              condition: { rules: [{ field: 'globalSwitch', operator: 'equals', value: true }] }
+            }
+          ]
+        }
+      ];
+
+      const { formFieldsValues, formFieldsVisibility } = useFormValidation(fields);
+
+      // Initial state assertions
+      expect(formFieldsVisibility['itemsList[0].conditionalDetails']).toBe(false); // Correctly false initially because root.itemSwitch is undefined or not true
+      expect(formFieldsVisibility['itemsList[0].globalDependentDetails']).toBe(false); // Correctly false as globalSwitch is false
+
+      // Try to activate conditionalDetails by changing the itemSwitch within the list item
+      formFieldsValues.itemsList[0].itemSwitch = true;
+      await advanceTicks(10); // Increased ticks significantly
+
+      // *** This assertion should now PASS due to the fix ***
+      // With the corrected path resolution, changing itemsList[0].itemSwitch to true
+      // should make itemsList[0].conditionalDetails visible.
+      expect(formFieldsVisibility['itemsList[0].conditionalDetails']).toBe(true);
+
+      // Now test the global switch, which should work regardless of the list item bug
+      formFieldsValues.globalSwitch = true;
+      await advanceTicks(10); // Increased ticks significantly
+      expect(formFieldsVisibility['itemsList[0].globalDependentDetails']).toBe(true); // This should pass
+    });
+  });
 });
