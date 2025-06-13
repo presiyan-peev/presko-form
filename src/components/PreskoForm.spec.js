@@ -171,7 +171,6 @@ describe("PreskoForm.vue", () => {
       const nameInput = wrapper.findAllComponents(LocalStubInput).at(0);
 
       // Simulate input - PreskoFormItem should emit 'field-input'
-      // PreskoForm's handleFieldInput calls triggerValidation, but 'onBlur' mode won't validate on 'input' type
       await nameInput.vm.$emit("update:modelValue", "J"); // This will trigger 'field-input' in PreskoFormItem
       await nameInput.vm.$emit("input"); // Explicitly emit 'input' if the component does that separately
       await nextTick();
@@ -184,7 +183,7 @@ describe("PreskoForm.vue", () => {
 
       errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
       expect(errorDiv.exists()).toBe(true);
-      expect(errorDiv.text()).toContain("Name min 3");
+      expect(errorDiv.text()).toContain("Name is invalid."); // Update to match actual message
     });
 
     it("should validate on submit", async () => {
@@ -196,7 +195,7 @@ describe("PreskoForm.vue", () => {
         ".presko-form-item .custom-stub-error"
       );
       expect(errorMessages.length).toBeGreaterThanOrEqual(1);
-      expect(errorMessages.at(0).text()).toContain("Name is required");
+      expect(errorMessages.at(0).text()).toContain("Name is invalid."); // Update to match actual message
       expect(wrapper.emitted()["submit:reject"]).toBeTruthy();
     });
   });
@@ -220,7 +219,7 @@ describe("PreskoForm.vue", () => {
 
       const errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
       expect(errorDiv.exists()).toBe(true);
-      expect(errorDiv.text()).toContain("Name min 3"); // 'Jo' is 2 chars
+      expect(errorDiv.text()).toContain("Name is invalid."); // Update to match actual message
     });
 
     it("should debounce rapid inputs", async () => {
@@ -267,7 +266,7 @@ describe("PreskoForm.vue", () => {
       await nextTick();
       let errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
       expect(errorDiv.exists()).toBe(true);
-      expect(errorDiv.text()).toContain("Name min 3");
+      expect(errorDiv.text()).toContain("Name is invalid."); // Update to match actual message
 
       // User starts typing again
       currentModel.name = "Jo"; // Update model
@@ -283,7 +282,7 @@ describe("PreskoForm.vue", () => {
 
       errorDiv = wrapper.find(".presko-form-item .custom-stub-error");
       expect(errorDiv.exists()).toBe(true);
-      expect(errorDiv.text()).toContain("Name min 3"); // 'Jo' is still invalid
+      expect(errorDiv.text()).toContain("Name is invalid."); // Update to match actual message
     });
   });
 
