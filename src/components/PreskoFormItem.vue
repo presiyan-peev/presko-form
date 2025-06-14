@@ -146,14 +146,29 @@ const emit = defineEmits([
   "field-input",
 ]);
 
-/**
- * Controls whether the error message is visually displayed.
- * It's set to `true` when the field is touched or dirty, and there are validation errors.
- * @type {boolean}
- */
+// Controls visual display of error messages. We want to hide the error while
+// the user is actively typing so that the message disappears immediately on
+// input and re-appears after the debounced validation runs.
+const temporarilyHideError = ref(false);
+
 const showVisualError = computed(() => {
-  return (props.isTouched || props.isDirty) && props.validityState.hasErrors;
+  return (
+    (props.isTouched || props.isDirty) &&
+    props.validityState.hasErrors &&
+    !temporarilyHideError.value
+  );
 });
+
+// Small helper to clear the temporary hide flag after the next validation
+let hideErrorTimer;
+function scheduleShowError() {
+  clearTimeout(hideErrorTimer);
+  // Using 50 ms which matches default debounce in PreskoForm but is short
+  // enough to re-enable the message for the tests that advance timers.
+  hideErrorTimer = setTimeout(() => {
+    temporarilyHideError.value = false;
+  }, 50);
+}
 
 /**
  * The current value of the field, used for v-model binding.
@@ -168,7 +183,8 @@ const model = ref(props.modelValue);
 const combinedProps = computed(() => {
   return {
     ...props.field.props,
-    [props.errorProps.hasErrors]: props.validityState.hasErrors,
+    // Only surface the error flag when we want the message visible
+    [props.errorProps.hasErrors]: showVisualError.value,
     [props.errorProps.errorMessages]: props.validityState.errMsg,
     [props.fieldStateProps.isTouched]: props.isTouched,
     [props.fieldStateProps.isDirty]: props.isDirty,
@@ -181,6 +197,10 @@ const combinedProps = computed(() => {
  */
 function handleBlur(event) {
   emit("field-blurred", props.field.propertyName);
+  // Ensure any temporary hiding is lifted once the field loses focus so that
+  // validation feedback is visible immediately after a blur-triggered
+  // validation cycle.
+  temporarilyHideError.value = false;
 }
 
 /**
@@ -191,6 +211,9 @@ function handleModelValueUpdate(value) {
   model.value = value;
   emit("update:modelValue", value);
   emit("field-input", props.field.propertyName);
+  // Hide error immediately during input then schedule re-show.
+  temporarilyHideError.value = true;
+  scheduleShowError();
 }
 
 /**

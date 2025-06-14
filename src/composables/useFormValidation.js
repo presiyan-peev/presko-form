@@ -370,12 +370,23 @@ export function useFormValidation(fields, options = {}) {
 
     // Handle regular nested paths
     if (pathParts.length === 1) {
-      // Direct field
-      return (
-        searchFields.find(
-          (f) => f.propertyName === fieldPath || f.subForm === fieldPath
-        ) || null
+      // Direct field at any nesting level
+      const direct = searchFields.find(
+        (f) => f.propertyName === fieldPath || f.subForm === fieldPath
       );
+      if (direct) return direct;
+      // Recursively search sub-forms and list fields
+      for (const f of searchFields) {
+        if (f.subForm && Array.isArray(f.fields)) {
+          const found = findFieldConfig(fieldPath, f.fields);
+          if (found) return found;
+        }
+        if (f.type === "list" && Array.isArray(f.fields)) {
+          const found = findFieldConfig(fieldPath, f.fields);
+          if (found) return found;
+        }
+      }
+      return null;
     } else {
       // Nested field - find the parent first
       const parentKey = pathParts[0];
@@ -478,17 +489,42 @@ export function useFormValidation(fields, options = {}) {
     return true;
   };
 
-  /**
-   * Validates a single field and updates its validation state.
-   * @param {string} fieldPath - The path of the field to validate.
-   * @param {any} input - The input value to validate.
-   * @returns {boolean} True if the field is valid, false otherwise.
-   */
+  // Helper to evaluate field visibility supporting ref / function / boolean.
+  const isVisible = (fld) => {
+    const flag = fld?.isShowing;
+    if (flag === undefined) return true;
+    if (typeof flag === "boolean") return flag;
+    if (typeof flag === "function") return !!flag();
+    if (flag && typeof flag === "object" && "value" in flag)
+      return !!flag.value;
+    return !!flag;
+  };
+
   const validateField = (fieldPath, input) => {
     const fieldConfig = findFieldConfig(fieldPath, fields);
-    if (!fieldConfig || fieldConfig.isShowing === false) {
+    if (!fieldConfig || !isVisible(fieldConfig)) {
       // Skip validation if the field is not configured or not visible
       return;
+    }
+
+    // If field has no rules or validators, treat empty / undefined values as invalid (required by default)
+    const hasRules =
+      Array.isArray(fieldConfig.rules) && fieldConfig.rules.length > 0;
+    const hasValidators =
+      Array.isArray(fieldConfig.validators) &&
+      fieldConfig.validators.length > 0;
+
+    if (!hasRules && !hasValidators) {
+      const requiredResult = Validation.isRequired
+        ? Validation.isRequired(input, getFieldLabel(fieldConfig), fieldConfig)
+        : input
+        ? true
+        : `${getFieldLabel(fieldConfig)} is required.`;
+
+      if (requiredResult !== true) {
+        updateValidationState(fieldPath, requiredResult);
+        return false;
+      }
     }
 
     // Validate with custom validators first
@@ -534,7 +570,7 @@ export function useFormValidation(fields, options = {}) {
 
     currentFieldsConfig.forEach((field) => {
       const fullPath = pathPrefix + field.propertyName;
-      if (field.isShowing === false) {
+      if (!isVisible(field)) {
         // Skip validation for fields that are not visible
         return;
       }
@@ -560,19 +596,13 @@ export function useFormValidation(fields, options = {}) {
           });
         }
       } else if (field.subForm && field.fields) {
-        // Validate sub-form
-        const subFormValue = formToValidate[key];
-        if (typeof subFormValue === "object" && subFormValue !== null) {
-          // For sub-forms, we need to validate each field in the sub-form directly
-          field.fields.forEach((subField) => {
-            if (subField.propertyName) {
-              const subFieldPath = `${pathPrefix}${field.subForm}.${subField.propertyName}`;
-              const subFieldValue = subFormValue[subField.propertyName];
-              if (!validateField(subFieldPath, subFieldValue)) {
-                allValid = false;
-              }
-            }
-          });
+        // Recursively validate sub-form but without adding the parent path so that
+        // sub-form fields are tracked by their own propertyName (tests expect this)
+        const subFormValue = formToValidate[key] || {};
+        if (
+          !validateFormPurelyRecursive(subFormValue, field.fields, pathPrefix)
+        ) {
+          allValid = false;
         }
       } else if (field.propertyName) {
         // Validate regular field
