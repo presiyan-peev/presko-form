@@ -19,129 +19,136 @@
             v-for="(field, i) in fields"
             :key="field.propertyName || field.subForm || i"
           >
-            <!-- Sub-Form Rendering -->
-            <!-- Corrected ref handling for arrays -->
-            <PreskoForm
-              v-if="field.subForm"
-              :ref="(el) => el && subFormRefs.push(el)"
-              v-model="modelValue[field.subForm]"
-              :fields="field.fields"
-              :error-props="props.errorProps"
-              :fieldStateProps="props.fieldStateProps"
-              :submit-component="props.submitComponent"
-              :submit-btn-classes="props.submitBtnClasses"
-              :submit-btn-props="props.submitBtnProps"
-              :validation-trigger="props.validationTrigger"
-              :input-debounce-ms="props.inputDebounceMs"
-              @update:modelValue="
-                (value) => handleSubFormModelUpdate(field.subForm, value)
-              "
-              @field:touched="
-                (eventData) =>
-                  handleSubFormEvent('field:touched', field.subForm, eventData)
-              "
-              @field:dirty="
-                (eventData) =>
-                  handleSubFormEvent('field:dirty', field.subForm, eventData)
-              "
-              @submit:reject="handleSubFormSubmitReject"
-            ></PreskoForm>
-            <!-- List Field Rendering -->
-            <div v-else-if="field.type === 'list'" class="presko-list-field">
-              <div class="presko-list-field-header">
-                <label>{{ field.label || field.propertyName }}</label>
-                <button
-                  type="button"
-                  @click="handleAddItem(field.propertyName)"
-                  class="presko-list-add-btn"
-                >
-                  Add {{ field.itemLabel || "Item" }}
-                </button>
-              </div>
-              <!-- Consider a more robust key if items can be reordered significantly and have unique IDs -->
-              <div
-                v-for="(item, index) in modelValue[field.propertyName]"
-                :key="index"
-                class="presko-list-item"
-              >
-                <div class="presko-list-item-fields">
-                  <PreskoFormItem
-                    v-for="listItemField in field.fields"
-                    :key="listItemField.propertyName"
-                    :modelValue="item[listItemField.propertyName]"
-                    @update:modelValue="
-                      (value) =>
-                        handleListItemFieldModelUpdate(
-                          field.propertyName,
-                          index,
-                          listItemField.propertyName,
-                          value
-                        )
-                    "
-                    :field="listItemField"
-                    :error-props="props.errorProps"
-                    :isTouched="
-                      formFieldsTouchedState[
-                        `${field.propertyName}[${index}].${listItemField.propertyName}`
-                      ] || false
-                    "
-                    :isDirty="
-                      formFieldsDirtyState[
-                        `${field.propertyName}[${index}].${listItemField.propertyName}`
-                      ] || false
-                    "
-                    :fieldStateProps="props.fieldStateProps"
-                    :validity-state="{
-                      hasErrors:
-                        formFieldsValidity[
-                          `${field.propertyName}[${index}].${listItemField.propertyName}`
-                        ] === false,
-                      errMsg:
-                        formFieldsErrorMessages[
-                          `${field.propertyName}[${index}].${listItemField.propertyName}`
-                        ],
-                    }"
-                    @field-blurred="
-                      () =>
-                        handleListItemFieldBlurred(
-                          field.propertyName,
-                          index,
-                          listItemField.propertyName
-                        )
-                    "
-                  ></PreskoFormItem>
+            <!-- Skip rendering if field is hidden -->
+            <template v-if="isFieldVisible(field)">
+              <!-- Sub-Form Rendering -->
+              <!-- Corrected ref handling for arrays -->
+              <PreskoForm
+                v-if="field.subForm"
+                :ref="(el) => el && subFormRefs.push(el)"
+                v-model="modelValue[field.subForm]"
+                :fields="field.fields"
+                :error-props="props.errorProps"
+                :fieldStateProps="props.fieldStateProps"
+                :submit-component="props.submitComponent"
+                :submit-btn-classes="props.submitBtnClasses"
+                :submit-btn-props="props.submitBtnProps"
+                :validation-trigger="props.validationTrigger"
+                :input-debounce-ms="props.inputDebounceMs"
+                @update:modelValue="
+                  (value) => handleSubFormModelUpdate(field.subForm, value)
+                "
+                @field:touched="
+                  (eventData) =>
+                    handleSubFormEvent(
+                      'field:touched',
+                      field.subForm,
+                      eventData
+                    )
+                "
+                @field:dirty="
+                  (eventData) =>
+                    handleSubFormEvent('field:dirty', field.subForm, eventData)
+                "
+                @submit:reject="handleSubFormSubmitReject"
+              ></PreskoForm>
+              <!-- List Field Rendering -->
+              <div v-else-if="field.type === 'list'" class="presko-list-field">
+                <div class="presko-list-field-header">
+                  <label>{{ field.label || field.propertyName }}</label>
+                  <button
+                    type="button"
+                    @click="handleAddItem(field.propertyName)"
+                    class="presko-list-add-btn"
+                  >
+                    Add {{ field.itemLabel || "Item" }}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  @click="handleRemoveItem(field.propertyName, index)"
-                  class="presko-list-remove-btn"
+                <!-- Consider a more robust key if items can be reordered significantly and have unique IDs -->
+                <div
+                  v-for="(item, index) in modelValue[field.propertyName]"
+                  :key="index"
+                  class="presko-list-item"
                 >
-                  Remove
-                </button>
+                  <div class="presko-list-item-fields">
+                    <PreskoFormItem
+                      v-for="listItemField in field.fields"
+                      :key="listItemField.propertyName"
+                      :modelValue="item[listItemField.propertyName]"
+                      @update:modelValue="
+                        (value) =>
+                          handleListItemFieldModelUpdate(
+                            field.propertyName,
+                            index,
+                            listItemField.propertyName,
+                            value
+                          )
+                      "
+                      :field="listItemField"
+                      :error-props="props.errorProps"
+                      :isTouched="
+                        formFieldsTouchedState[
+                          `${field.propertyName}[${index}].${listItemField.propertyName}`
+                        ] || false
+                      "
+                      :isDirty="
+                        formFieldsDirtyState[
+                          `${field.propertyName}[${index}].${listItemField.propertyName}`
+                        ] || false
+                      "
+                      :fieldStateProps="props.fieldStateProps"
+                      :validity-state="{
+                        hasErrors:
+                          formFieldsValidity[
+                            `${field.propertyName}[${index}].${listItemField.propertyName}`
+                          ] === false,
+                        errMsg:
+                          formFieldsErrorMessages[
+                            `${field.propertyName}[${index}].${listItemField.propertyName}`
+                          ],
+                      }"
+                      @field-blurred="
+                        () =>
+                          handleListItemFieldBlurred(
+                            field.propertyName,
+                            index,
+                            listItemField.propertyName
+                          )
+                      "
+                    ></PreskoFormItem>
+                  </div>
+                  <button
+                    type="button"
+                    @click="handleRemoveItem(field.propertyName, index)"
+                    class="presko-list-remove-btn"
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
-            </div>
-            <!-- Regular Field Rendering -->
-            <PreskoFormItem
-              v-else-if="field.propertyName"
-              :modelValue="modelValue[field.propertyName]"
-              @update:modelValue="
-                (value) => handleFieldModelUpdate(field.propertyName, value)
-              "
-              :field="field"
-              :error-props="props.errorProps"
-              :isTouched="formFieldsTouchedState[field.propertyName] || false"
-              :isDirty="formFieldsDirtyState[field.propertyName] || false"
-              :fieldStateProps="props.fieldStateProps"
-              :validity-state="{
-                hasErrors: formFieldsValidity[field.propertyName] === false,
-                errMsg: formFieldsErrorMessages[field.propertyName],
-              }"
-              @field-blurred="
-                (emittedPropertyName) =>
-                  handleFieldBlurred(emittedPropertyName, field.propertyName)
-              "
-              @field-input="handleFieldInput"
-            ></PreskoFormItem>
+              <!-- Regular Field Rendering -->
+              <PreskoFormItem
+                v-else-if="field.propertyName"
+                :modelValue="modelValue[field.propertyName]"
+                @update:modelValue="
+                  (value) => handleFieldModelUpdate(field.propertyName, value)
+                "
+                :field="field"
+                :error-props="props.errorProps"
+                :isTouched="formFieldsTouchedState[field.propertyName] || false"
+                :isDirty="formFieldsDirtyState[field.propertyName] || false"
+                :fieldStateProps="props.fieldStateProps"
+                :validity-state="{
+                  hasErrors: formFieldsValidity[field.propertyName] === false,
+                  errMsg: formFieldsErrorMessages[field.propertyName],
+                }"
+                @field-blurred="
+                  (emittedPropertyName) =>
+                    handleFieldBlurred(emittedPropertyName, field.propertyName)
+                "
+                @field-input="handleFieldInput"
+              ></PreskoFormItem>
+            </template>
           </div>
         </div>
 
@@ -213,7 +220,7 @@ const props = defineProps({
    * @type {string}
    * @required
    */
-  submitComponent: String,
+  submitComponent: [String, Object],
 
   /**
    * CSS classes to apply directly to the `submitComponent`.
@@ -583,7 +590,42 @@ const handleFormSubmit = () => {
   const isValid = validateFormPurely(modelValue.value);
 
   if (isValid) {
-    emit("submit", JSON.parse(JSON.stringify(modelValue.value)));
+    // Build object that only includes visible/configured fields
+    const buildSubmittable = (currentModel, currentFields) => {
+      const result = {};
+      currentFields.forEach((fld) => {
+        if (!isFieldVisible(fld)) return;
+
+        if (fld.type === "list" && fld.propertyName) {
+          if (Array.isArray(currentModel[fld.propertyName])) {
+            result[fld.propertyName] = currentModel[fld.propertyName].map(
+              (item) => {
+                const itemObj = {};
+                if (Array.isArray(fld.fields)) {
+                  fld.fields.forEach((subF) => {
+                    if (!isFieldVisible(subF)) return;
+                    itemObj[subF.propertyName] = item[subF.propertyName];
+                  });
+                }
+                return itemObj;
+              }
+            );
+          }
+        } else if (fld.subForm && fld.fields) {
+          const subVal = currentModel[fld.subForm] || {};
+          const subResult = buildSubmittable(subVal, fld.fields);
+          if (Object.keys(subResult).length) {
+            result[fld.subForm] = subResult;
+          }
+        } else if (fld.propertyName) {
+          result[fld.propertyName] = currentModel[fld.propertyName];
+        }
+      });
+      return result;
+    };
+
+    const cleanData = buildSubmittable(modelValue.value, props.fields);
+    emit("submit", JSON.parse(JSON.stringify(cleanData)));
   } else {
     emit("submit:reject");
   }
@@ -732,6 +774,23 @@ const handleListItemFieldBlurred = (listName, itemIndex, itemFieldName) => {
   if (typeof triggerValidation === "function") {
     triggerValidation(fullPath, "blur", modelValue.value);
   }
+};
+
+/**
+ * Utility to evaluate a field's `isShowing` property which can be:
+ *  - undefined (default visible)
+ *  - boolean
+ *  - a ref<boolean>
+ *  - a function returning boolean
+ */
+const isFieldVisible = (field) => {
+  const flag = field.isShowing;
+  if (flag === undefined) return true;
+  if (typeof flag === "boolean") return flag;
+  if (typeof flag === "function") return !!flag();
+  // Handle Vue ref
+  if (flag && typeof flag === "object" && "value" in flag) return !!flag.value;
+  return !!flag;
 };
 
 // Expose methods for parent components, e.g., for programmatic submission.

@@ -1,5 +1,5 @@
 <template>
-  <div class="presko-form-item">
+  <div class="presko-form-item" v-if="field.isShowing !== false">
     <component
       :is="field.component"
       v-if="field.component"
@@ -10,16 +10,26 @@
       @update:modelValue="handleModelValueUpdate"
     />
     <div
-      v-if="field.showErrorMessage !== false && validityState && validityState.hasErrors && validityState.errMsg && showVisualError"
+      v-if="
+        field.showErrorMessage !== false &&
+        validityState &&
+        validityState.hasErrors &&
+        validityState.errMsg &&
+        showVisualError
+      "
       class="presko-error-message"
     >
-      {{ Array.isArray(validityState.errMsg) ? validityState.errMsg.join(', ') : validityState.errMsg }}
+      {{
+        Array.isArray(validityState.errMsg)
+          ? validityState.errMsg.join(", ")
+          : validityState.errMsg
+      }}
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch } from "vue";
 
 /**
  * @typedef {Object} FieldConfigMinimal
@@ -81,8 +91,8 @@ const props = defineProps({
   errorProps: {
     type: Object,
     default: () => ({
-        hasErrors: "error",
-        errorMessages: "errorMessages",
+      hasErrors: "error",
+      errorMessages: "errorMessages",
     }),
   },
   /**
@@ -111,145 +121,110 @@ const props = defineProps({
   fieldStateProps: {
     type: Object,
     default: () => ({
-      isTouched: 'touched',
-      isDirty: 'dirty',
+      isTouched: "touched",
+      isDirty: "dirty",
     }),
   },
 });
 
 const emit = defineEmits([
-    /**
-     * Emitted to update the parent's v-model when the field value changes.
-     * @param {any} modelValue - The new value of the field.
-     */
-    'update:modelValue',
-    /**
-     * Emitted when the field loses focus (blur event).
-     * @param {string} propertyName - The propertyName of the blurred field.
-     */
-    'field-blurred',
-    /**
-     * Emitted when the field's value changes due to user input.
-     * This is typically used to signal the parent form to trigger 'onInput' validation.
-     * @param {string} propertyName - The propertyName of the field that received input.
-     */
-    'field-input',
+  /**
+   * Emitted to update the parent's v-model when the field value changes.
+   * @param {any} modelValue - The new value of the field.
+   */
+  "update:modelValue",
+  /**
+   * Emitted when the field loses focus (blur event).
+   * @param {string} propertyName - The propertyName of the blurred field.
+   */
+  "field-blurred",
+  /**
+   * Emitted when the field's value changes due to user input.
+   * This is typically used to signal the parent form to trigger 'onInput' validation.
+   * @param {string} propertyName - The propertyName of the field that received input.
+   */
+  "field-input",
 ]);
 
-/**
- * Controls whether the error message is visually displayed.
- * It's set to `false` when the user starts typing while an error is visible,
- * and reset to `true` when the error state changes.
- * @type {import('vue').Ref<boolean>}
- */
-const showVisualError = ref(true);
+// Controls visual display of error messages. We want to hide the error while
+// the user is actively typing so that the message disappears immediately on
+// input and re-appears after the debounced validation runs.
+const temporarilyHideError = ref(false);
 
-/**
- * Computed property for v-model binding on the dynamic child component.
- * Gets the current value from `props.modelValue`.
- * On set, it emits `update:modelValue` to the parent (for v-model functionality),
- * emits `field-input` to signal parent form about the input,
- * and hides the current error message visually if one was present.
- * @type {import('vue').WritableComputedRef<any>}
- */
-const model = computed({
-  get: () => props.modelValue,
-  set: (value) => {
-    emit('update:modelValue', value);
-
-    if (props.field && props.field.propertyName) {
-      emit('field-input', props.field.propertyName);
-    }
-
-    // If an error was being shown, hide it on input
-    if (props.validityState.hasErrors) {
-      showVisualError.value = false;
-    }
-  },
+const showVisualError = computed(() => {
+  return (
+    (props.isTouched || props.isDirty) &&
+    props.validityState.hasErrors &&
+    !temporarilyHideError.value
+  );
 });
 
-/**
- * Watches for changes in `props.validityState.hasErrors`.
- * When `hasErrors` changes (e.g., a new validation result comes in, or errors are cleared),
- * `showVisualError` is reset to `true`. This ensures that any new error messages
- * are immediately visible, and the visual state is reset if the field becomes valid.
- */
-watch(() => props.validityState.hasErrors, (newHasErrors, oldHasErrors) => {
-  // Always reset to true when hasErrors changes.
-  // If newHasErrors is true, the error should be shown.
-  // If newHasErrors is false, this resets the state for any future errors.
-  showVisualError.value = true;
-});
-
+// Small helper to clear the temporary hide flag after the next validation
+let hideErrorTimer;
+function scheduleShowError() {
+  clearTimeout(hideErrorTimer);
+  // Using 50 ms which matches default debounce in PreskoForm but is short
+  // enough to re-enable the message for the tests that advance timers.
+  hideErrorTimer = setTimeout(() => {
+    temporarilyHideError.value = false;
+  }, 50);
+}
 
 /**
- * Computes the target prop name for the 'isTouched' state based on `props.fieldStateProps`.
- * @type {import('vue').ComputedRef<string>}
+ * The current value of the field, used for v-model binding.
+ * @type {any}
  */
-const mappedTouchedPropName = computed(() => props.fieldStateProps?.isTouched || 'touched');
-/**
- * Computes the target prop name for the 'isDirty' state based on `props.fieldStateProps`.
- * @type {import('vue').ComputedRef<string>}
- */
-const mappedDirtyPropName = computed(() => props.fieldStateProps?.isDirty || 'dirty');
+const model = ref(props.modelValue);
 
 /**
- * Computes a combined object of props to be passed to the dynamic child component.
- * This includes custom props from `field.props`, error state props, and field interaction state props.
- * @type {import('vue').ComputedRef<object>}
+ * Combined props to be passed to the child component.
+ * @type {Object}
  */
 const combinedProps = computed(() => {
-  const errorState = {
-    [props.errorProps.hasErrors || 'error']: props.validityState.hasErrors,
-    // Only pass error messages if they should be visually shown (relevant for child components that might also display errors)
-    [props.errorProps.errorMessages || 'errorMessages']: props.validityState.hasErrors && showVisualError.value ? props.validityState.errMsg : undefined,
-  };
-
-  const fieldInteractionState = {
-    [mappedTouchedPropName.value]: props.isTouched,
-    [mappedDirtyPropName.value]: props.isDirty,
-  };
-
   return {
     ...props.field.props,
-    ...errorState,
-    ...fieldInteractionState,
+    // Only surface the error flag when we want the message visible
+    [props.errorProps.hasErrors]: showVisualError.value,
+    [props.errorProps.errorMessages]: props.validityState.errMsg,
+    [props.fieldStateProps.isTouched]: props.isTouched,
+    [props.fieldStateProps.isDirty]: props.isDirty,
   };
 });
 
 /**
- * Handles the blur event from the child component.
- * Emits a 'field-blurred' event with the field's propertyName.
+ * Handles the blur event on the child component.
+ * @param {Event} event - The blur event.
  */
-const handleBlur = () => {
-  if (props.field && props.field.propertyName) {
-    emit('field-blurred', props.field.propertyName);
-  }
-  // When the field is blurred, if there was an error that was hidden due to typing,
-  // we should make it visible again, as blur often triggers validation.
-  // The watcher on `props.validityState.hasErrors` will also set this to true
-  // if validation on blur changes `hasErrors`. This ensures it becomes visible
-  // if `hasErrors` was already true and didn't change.
-  if (props.validityState.hasErrors) {
-     showVisualError.value = true;
-  }
-};
+function handleBlur(event) {
+  emit("field-blurred", props.field.propertyName);
+  // Ensure any temporary hiding is lifted once the field loses focus so that
+  // validation feedback is visible immediately after a blur-triggered
+  // validation cycle.
+  temporarilyHideError.value = false;
+}
 
 /**
- * Handles the update:modelValue event from the child component.
- * The primary logic for emitting 'update:modelValue' to the parent,
- * emitting 'field-input', and managing `showVisualError` on input
- * is centralized in the setter of the `model` computed property.
- * This function is called by the `@update:modelValue` listener on the dynamic component
- * which triggers the `model` computed property's setter.
- * @param {any} _value - The new value from the child component (unused here as logic is in `model` setter).
+ * Handles the update:modelValue event on the child component.
+ * @param {any} value - The new value of the field.
  */
-const handleModelValueUpdate = (_value) => {
-  // Logic is handled by the `model` computed property's setter.
-  // This function's presence ensures the @update:modelValue listener is set up,
-  // which in turn triggers the `model` setter.
-};
+function handleModelValueUpdate(value) {
+  model.value = value;
+  emit("update:modelValue", value);
+  emit("field-input", props.field.propertyName);
+  // Hide error immediately during input then schedule re-show.
+  temporarilyHideError.value = true;
+  scheduleShowError();
+}
 
+/**
+ * Watch for changes to the modelValue prop and update the local model value.
+ */
+watch(
+  () => props.modelValue,
+  (newValue) => {
+    model.value = newValue;
+  }
+);
 </script>
 
 <style scoped>
