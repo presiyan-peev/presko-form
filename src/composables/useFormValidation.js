@@ -481,6 +481,46 @@ export function useFormValidation(fields, options = {}) {
             `${getFieldLabel(field)} format is invalid.`;
         }
 
+        // NEW: Internal fallback for common rules if Validation implementation returns undefined
+        if (result === undefined) {
+          // Handle object rule (with name) and string rule uniformly
+          const ruleName =
+            typeof rule === "object" && rule.name ? rule.name : rule;
+          switch (ruleName) {
+            case "isRequired": {
+              const isPresent = !(
+                input === null ||
+                input === undefined ||
+                (typeof input === "string" && input.trim() === "")
+              );
+              result = isPresent ? true : `${getFieldLabel(field)} is invalid.`;
+              break;
+            }
+            case "minLength": {
+              // Determine the minimum
+              let min = 0;
+              if (typeof rule === "object" && rule.params && rule.params.min) {
+                min = rule.params.min;
+              }
+              const length = input != null ? String(input).length : 0;
+              result =
+                length >= min ? true : `${getFieldLabel(field)} is invalid.`;
+              break;
+            }
+            case "isEmail": {
+              const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+              result =
+                !input || emailPattern.test(String(input))
+                  ? true
+                  : `${getFieldLabel(field)} is not a valid email.`;
+              break;
+            }
+            default:
+              // If we have no internal fallback, treat as valid
+              result = true;
+          }
+        }
+
         if (result !== true) {
           return result || `${getFieldLabel(field)} is invalid.`;
         }
@@ -517,12 +557,23 @@ export function useFormValidation(fields, options = {}) {
     if (!hasRules && !hasValidators) {
       const requiredResult = Validation.isRequired
         ? Validation.isRequired(input, getFieldLabel(fieldConfig), fieldConfig)
-        : input
-        ? true
-        : `${getFieldLabel(fieldConfig)} is required.`;
+        : undefined;
 
-      if (requiredResult !== true) {
-        updateValidationState(fieldPath, requiredResult);
+      // Internal fallback if external Validation returns undefined
+      let finalRequiredResult = requiredResult;
+      if (finalRequiredResult === undefined) {
+        const isPresent = !(
+          input === null ||
+          input === undefined ||
+          (typeof input === "string" && input.trim() === "")
+        );
+        finalRequiredResult = isPresent
+          ? true
+          : `${getFieldLabel(fieldConfig)} is invalid.`;
+      }
+
+      if (finalRequiredResult !== true) {
+        updateValidationState(fieldPath, finalRequiredResult);
         return false;
       }
     }
