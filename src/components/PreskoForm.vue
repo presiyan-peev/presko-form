@@ -1,5 +1,8 @@
 <template>
   <div>
+    <div role="alert" aria-live="assertive" class="presko-sr-only">
+      {{ liveErrorAnnouncement }}
+    </div>
     <!--
       @slot Default scoped slot for form content.
       @binding {boolean} isFormDirty - True if any field in the form is dirty.
@@ -74,6 +77,7 @@
                     <PreskoFormItem
                       v-for="listItemField in field.fields"
                       :key="listItemField.propertyName"
+                      :ref="(el) => { if (el) formItemRefs[`${field.propertyName}[${index}].${listItemField.propertyName}`] = el; }"
                       :modelValue="item[listItemField.propertyName]"
                       @update:modelValue="
                         (value) =>
@@ -97,6 +101,7 @@
                         ] || false
                       "
                       :fieldStateProps="props.fieldStateProps"
+                      :fieldPath="`${field.propertyName}[${index}].${listItemField.propertyName}`"
                       :validity-state="{
                         hasErrors:
                           formFieldsValidity[
@@ -129,6 +134,7 @@
               <!-- Regular Field Rendering -->
               <PreskoFormItem
                 v-else-if="field.propertyName"
+                :ref="(el) => { if (el) formItemRefs[field.propertyName] = el; }"
                 :modelValue="modelValue[field.propertyName]"
                 @update:modelValue="
                   (value) => handleFieldModelUpdate(field.propertyName, value)
@@ -138,6 +144,7 @@
                 :isTouched="formFieldsTouchedState[field.propertyName] || false"
                 :isDirty="formFieldsDirtyState[field.propertyName] || false"
                 :fieldStateProps="props.fieldStateProps"
+                :fieldPath="field.propertyName"
                 :validity-state="{
                   hasErrors: formFieldsValidity[field.propertyName] === false,
                   errMsg: formFieldsErrorMessages[field.propertyName],
@@ -287,6 +294,35 @@ const props = defineProps({
     type: Number,
     default: 100,
   },
+  /**
+   * Automatically focus the first invalid field on submission error.
+   * @type {boolean}
+   * @default true
+   */
+  autoFocusOnError: {
+    type: Boolean,
+    default: true,
+  },
+  /**
+   * Custom function to scroll to the first invalid field.
+   * Receives the DOM element of the first invalid field as an argument.
+   * If not provided, `element.scrollIntoView()` is used.
+   * @type {Function | null}
+   * @default null
+   */
+  scrollToError: {
+    type: Function,
+    default: null,
+  },
+  /**
+   * Message to be announced by screen readers when a validation error occurs on submit.
+   * @type {string}
+   * @default "Please correct the highlighted field"
+   */
+  errorAnnouncement: {
+    type: String,
+    default: "Please correct the highlighted field",
+  },
 });
 
 const emit = defineEmits([
@@ -328,6 +364,8 @@ const modelValue = defineModel("modelValue", {
 
 // Template refs for sub-forms
 const subFormRefs = ref([]);
+const liveErrorAnnouncement = ref("");
+const formItemRefs = ref({}); // To store refs to PreskoFormItem components
 
 /**
  * Initializes the model with fields' default values if they are not already present.
@@ -589,6 +627,8 @@ const handleFormSubmit = () => {
   // Validate the entire current form's model.
   const isValid = validateFormPurely(modelValue.value);
 
+  liveErrorAnnouncement.value = ""; // Clear previous error messages
+
   if (isValid) {
     // Build object that only includes visible/configured fields
     const buildSubmittable = (currentModel, currentFields) => {
@@ -627,7 +667,92 @@ const handleFormSubmit = () => {
     const cleanData = buildSubmittable(modelValue.value, props.fields);
     emit("submit", JSON.parse(JSON.stringify(cleanData)));
   } else {
-    emit("submit:reject");
+    let firstInvalidPath = null;
+    let firstInvalidEl = null;
+
+    // Flatten fields to respect defined order, including list items
+    const fieldsToIterate = [];
+    if (props.fields && Array.isArray(props.fields)) {
+      props.fields.forEach(field => {
+        // Skip non-visible top-level fields early
+        if (!isFieldVisible(field)) return;
+
+        if (field.propertyName) {
+          fieldsToIterate.push({ path: field.propertyName, fieldDef: field });
+        } else if (field.type === 'list' && field.propertyName && Array.isArray(modelValue.value[field.propertyName])) {
+          modelValue.value[field.propertyName].forEach((_item, i) => {
+            if (Array.isArray(field.fields)) {
+              field.fields.forEach(listItemField => {
+                // Skip non-visible list item fields
+                if (!isFieldVisible(listItemField)) return;
+                fieldsToIterate.push({ path: `${field.propertyName}[${i}].${listItemField.propertyName}`, fieldDef: listItemField });
+              });
+            }
+          });
+        } else if (field.subForm) {
+          // Add subform itself for potential direct errors on the subform object
+           fieldsToIterate.push({ path: field.subForm, fieldDef: field, isSubFormContainer: true });
+        }
+      });
+    }
+
+    for (const { path, fieldDef, isSubFormContainer } of fieldsToIterate) {
+      if (formFieldsValidity[path] === false) {
+        firstInvalidPath = path;
+        if (!isSubFormContainer) {
+            const itemRef = formItemRefs.value[path];
+            firstInvalidEl = itemRef?.$el || itemRef;
+        }
+        // else for isSubFormContainer, firstInvalidEl remains null, sub-form handles its own focus.
+        break;
+      }
+    }
+
+    // This secondary check for subForm errors is more of a fallback,
+    // if the primary iteration didn't catch a subForm container marked invalid.
+    if (!firstInvalidPath && props.fields && Array.isArray(props.fields)) {
+        for (const field of props.fields) {
+            if (field.subForm && isFieldVisible(field) && formFieldsValidity[field.subForm] === false) {
+                firstInvalidPath = field.subForm;
+                // firstInvalidEl will remain null as we expect sub-form to handle its internal focus
+                break;
+            }
+        }
+    }
+
+    emit("submit:reject", { firstInvalidPath, firstInvalidEl });
+    liveErrorAnnouncement.value = props.errorAnnouncement;
+
+    if (firstInvalidEl) {
+      const actualElement = firstInvalidEl.$el || firstInvalidEl;
+
+      if (actualElement) { // Ensure actualElement is not null/undefined
+        if (typeof props.scrollToError === "function") {
+          props.scrollToError(actualElement);
+        } else if (typeof actualElement.scrollIntoView === "function") {
+          actualElement.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+
+        if (props.autoFocusOnError) {
+          let focusableElementToTarget = null;
+          if (typeof actualElement.focus === 'function' && !actualElement.disabled) {
+            focusableElementToTarget = actualElement;
+          } else if (actualElement.querySelector) {
+            focusableElementToTarget = actualElement.querySelector('input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])');
+          }
+
+          if (focusableElementToTarget && typeof focusableElementToTarget.focus === 'function') {
+            setTimeout(() => {
+              try {
+                focusableElementToTarget.focus();
+              } catch (e) {
+                // console.error("Focus failed:", e);
+              }
+            }, 50);
+          }
+        }
+      }
+    }
   }
 };
 
@@ -852,5 +977,16 @@ defineExpose({
 .read-the-docs {
   /* From original scaffold, can be removed if not used */
   color: #888;
+}
+.presko-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
 </style>

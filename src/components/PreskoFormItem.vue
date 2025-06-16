@@ -1,5 +1,10 @@
 <template>
-  <div class="presko-form-item" v-if="field.isShowing !== false">
+  <div
+    class="presko-form-item"
+    v-if="field.isShowing !== false"
+    :data-pk-field="props.fieldPath"
+    ref="formItemRootRef"
+  >
     <component
       :is="field.component"
       v-if="field.component"
@@ -125,6 +130,16 @@ const props = defineProps({
       isDirty: "dirty",
     }),
   },
+  /**
+   * The full path of this field in the form structure (e.g., 'name', 'address.street').
+   * Used for the data-pk-field attribute.
+   * @type {string}
+   * @required
+   */
+  fieldPath: {
+    type: String,
+    required: true,
+  }
 });
 
 const emit = defineEmits([
@@ -225,6 +240,15 @@ watch(
     model.value = newValue;
   }
 );
+
+const formItemRootRef = ref(null);
+
+defineExpose({
+  /**
+   * A ref to the root DOM element of the PreskoFormItem.
+   */
+  formItemRootRef,
+});
 </script>
 
 <style scoped>
