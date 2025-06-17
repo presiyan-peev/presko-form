@@ -723,33 +723,47 @@ const handleFormSubmit = () => {
     emit("submit:reject", { firstInvalidPath, firstInvalidEl });
     liveErrorAnnouncement.value = props.errorAnnouncement;
 
-    if (firstInvalidEl) {
-      const actualElement = firstInvalidEl.$el || firstInvalidEl;
+    // firstInvalidEl is expected to be the PreskoFormItem's root DOM element here,
+    // obtained from itemRef.$el. Let's rename it for clarity in this block.
+    const formItemElement = firstInvalidEl;
 
-      if (actualElement) { // Ensure actualElement is not null/undefined
-        if (typeof props.scrollToError === "function") {
-          props.scrollToError(actualElement);
-        } else if (typeof actualElement.scrollIntoView === "function") {
-          actualElement.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (formItemElement) {
+      // Scroll logic should target the PreskoFormItem's root element.
+      if (typeof props.scrollToError === "function") {
+        props.scrollToError(formItemElement);
+      } else if (typeof formItemElement.scrollIntoView === "function") {
+        formItemElement.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+
+      if (props.autoFocusOnError) {
+        let focusableElementToTarget = null;
+        const preskoItemInstance = formItemRefs.value[firstInvalidPath];
+
+        if (preskoItemInstance && typeof preskoItemInstance.interactiveElement !== 'undefined') {
+          // interactiveElement is a computed ref, so access its .value
+          // and ensure it's not null before attempting to use it.
+          const exposedInteractiveElement = preskoItemInstance.interactiveElement;
+          if (exposedInteractiveElement) {
+            focusableElementToTarget = exposedInteractiveElement;
+          }
         }
 
-        if (props.autoFocusOnError) {
-          let focusableElementToTarget = null;
-          if (typeof actualElement.focus === 'function' && !actualElement.disabled) {
-            focusableElementToTarget = actualElement;
-          } else if (actualElement.querySelector) {
-            focusableElementToTarget = actualElement.querySelector('input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])');
-          }
+        // Fallback if PreskoFormItem doesn't expose interactiveElement or it's null
+        if (!focusableElementToTarget && formItemElement.querySelector) {
+          focusableElementToTarget = formItemElement.querySelector('input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])');
+        } else if (!focusableElementToTarget && typeof formItemElement.focus === 'function' && !formItemElement.disabled) {
+          // If the formItemElement itself is focusable (e.g. if it were an input directly, though it's a div)
+          focusableElementToTarget = formItemElement;
+        }
 
-          if (focusableElementToTarget && typeof focusableElementToTarget.focus === 'function') {
-            setTimeout(() => {
-              try {
-                focusableElementToTarget.focus();
-              } catch (e) {
-                // console.error("Focus failed:", e);
-              }
-            }, 50);
-          }
+        if (focusableElementToTarget && typeof focusableElementToTarget.focus === 'function') {
+          setTimeout(() => {
+            try {
+              focusableElementToTarget.focus();
+            } catch (e) {
+              // console.error("Focus failed:", e);
+            }
+          }, 50);
         }
       }
     }

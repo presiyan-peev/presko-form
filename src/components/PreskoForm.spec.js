@@ -680,7 +680,9 @@ describe("PreskoForm.vue", () => {
       Validation = await import("../validation");
       // Default all validation rules to pass unless specified in a test
       Object.keys(Validation.default).forEach((key) => {
-        Validation.default[key].mockReturnValue(true);
+        if (Validation.default[key] && typeof Validation.default[key].mockReturnValue === 'function') {
+          Validation.default[key].mockReturnValue(true);
+        }
       });
     });
 
@@ -836,10 +838,14 @@ describe("PreskoForm.vue", () => {
     });
 
     it("announces default error message if errorAnnouncement prop is not provided", async () => {
-      Validation.default.minLength.mockReturnValueOnce(false);
+      Validation.default.minLength.mockReturnValueOnce(false); // Name "J" will be invalid
       const model = reactive({ name: "J", email: "valid@example.com" });
 
-      const wrapper = createWrapper({ fields: getBaseFieldsConfig() }, model);
+      // Use createWrapper which doesn't stub PreskoFormItem by default
+      const wrapper = createWrapper(
+        { fields: getBaseFieldsConfig() }, // Props for PreskoForm
+        model // Initial model
+      );
       await nextTick();
 
       await wrapper.find("form").trigger("submit.prevent");
@@ -848,6 +854,59 @@ describe("PreskoForm.vue", () => {
       const liveRegion = wrapper.find('[role="alert"]');
       expect(liveRegion.exists()).toBe(true);
       expect(liveRegion.text()).toBe("Please correct the highlighted field"); // Default message
+    });
+
+    it("correctly focuses and scrolls to a nested field in a list", async () => {
+      Validation.default.isRequired.mockImplementation(val => !!val); // Empty string will fail
+
+      const initialModel = {
+        contacts: [
+          { name: "", email: "valid@example.com" }, // This name will be invalid
+          { name: "Jane Doe", email: "jane@example.com" },
+        ],
+      };
+
+      // Use createWrapper, ensuring PreskoFormItem is not globally stubbed if createWrapper doesn't do it.
+      // The default createWrapper in this file does not globally stub PreskoFormItem.
+      const wrapper = createWrapper(
+        { fields: getListFieldsConfig() }, // Use list field configuration
+        initialModel
+      );
+
+      await nextTick(); // Allow PreskoForm to initialize, including formItemRefs population
+
+      const targetPath = "contacts[0].name";
+      const formItemWrapper = wrapper.findComponent(`[data-pk-field="${targetPath}"]`);
+      expect(formItemWrapper.exists(), `PreskoFormItem for ${targetPath} should exist.`).toBe(true);
+
+      const formItemEl = formItemWrapper.element;
+      const inputEl = formItemEl.querySelector('input');
+      expect(inputEl, `Input element within ${targetPath} should exist.`).toBeTruthy();
+
+      const focusSpy = vi.spyOn(inputEl, "focus");
+      const scrollIntoViewSpy = vi.spyOn(formItemEl, "scrollIntoView");
+
+      // Make contacts[0].name invalid via the mock
+      Validation.default.isRequired.mockImplementation(val => {
+        if (val === initialModel.contacts[0].name) return false; // specifically make this one fail
+        return !!val;
+      });
+
+      await wrapper.find("form").trigger("submit.prevent");
+      await nextTick(); // Submit processing
+      vi.advanceTimersByTime(100); // For setTimeout in focus logic
+      await nextTick(); // DOM updates
+
+      expect(wrapper.emitted()["submit:reject"], "submit:reject should be emitted").toBeTruthy();
+      const rejectPayload = wrapper.emitted()["submit:reject"][0][0];
+      expect(rejectPayload.firstInvalidPath, "firstInvalidPath should be correct").toBe(targetPath);
+      expect(rejectPayload.firstInvalidEl, "firstInvalidEl should be the PreskoFormItem's root element").toBe(formItemEl);
+
+      expect(scrollIntoViewSpy, "scrollIntoView on PreskoFormItem root should be called").toHaveBeenCalled();
+      expect(focusSpy, "focus on the inner input element should be called").toHaveBeenCalled();
+
+      focusSpy.mockRestore();
+      scrollIntoViewSpy.mockRestore();
     });
   });
 });
