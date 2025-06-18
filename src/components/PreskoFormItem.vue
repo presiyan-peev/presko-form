@@ -1,8 +1,14 @@
 <template>
-  <div class="presko-form-item" v-if="field.isShowing !== false">
+  <div
+    class="presko-form-item"
+    v-if="field.isShowing !== false"
+    :data-pk-field="props.fieldPath"
+    ref="formItemRootRef"
+  >
     <component
       :is="field.component"
       v-if="field.component"
+      ref="fieldComponentRef"
       v-model="model"
       class="presko-form-field"
       v-bind="combinedProps"
@@ -125,6 +131,16 @@ const props = defineProps({
       isDirty: "dirty",
     }),
   },
+  /**
+   * The full path of this field in the form structure (e.g., 'name', 'address.street').
+   * Used for the data-pk-field attribute.
+   * @type {string}
+   * @required
+   */
+  fieldPath: {
+    type: String,
+    required: true,
+  }
 });
 
 const emit = defineEmits([
@@ -225,6 +241,46 @@ watch(
     model.value = newValue;
   }
 );
+
+const formItemRootRef = ref(null);
+const fieldComponentRef = ref(null);
+
+// Attempt to get the actual interactive DOM element from the field component.
+// This can be tricky as `fieldComponentRef.value` might be a Vue component instance
+// or a DOM element (if `field.component` is a string like 'input').
+const interactiveElement = computed(() => {
+  if (fieldComponentRef.value) {
+    // If the ref is a Vue component instance, $el is its root DOM element.
+    // If it's a native DOM element (e.g., component: 'input'), then $el doesn't exist, use the ref directly.
+    const el = fieldComponentRef.value.$el || fieldComponentRef.value;
+    // If `el` itself is focusable (e.g. it's an <input>), return it.
+    if (el && typeof el.focus === 'function') {
+      return el;
+    }
+    // Otherwise, try to find a focusable child within it. This is a common fallback.
+    if (el && typeof el.querySelector === 'function') {
+      return el.querySelector('input, textarea, select, button, [tabindex]:not([tabindex="-1"])');
+    }
+  }
+  return null;
+});
+
+defineExpose({
+  /**
+   * A ref to the root DOM element of the PreskoFormItem.
+   */
+  formItemRootRef,
+  /**
+   * A ref to the underlying interactive element (e.g. input, textarea) if accessible.
+   * This provides a more direct way for PreskoForm to focus the correct element.
+   */
+  interactiveElement,
+  /**
+   * Direct ref to the rendered dynamic component instance.
+   * Could be useful for calling component-specific methods if known.
+   */
+  fieldComponentRef,
+});
 </script>
 
 <style scoped>
