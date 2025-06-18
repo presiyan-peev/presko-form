@@ -272,10 +272,10 @@ describe("PreskoForm.vue", () => {
     });
 
     it("error message hides on input to an invalid field, then reappears if still invalid", async () => {
-    const currentModel = reactive({ name: "J", email: "" }); // J is invalid (minLength 3)
-    const Validation = await import("../validation");
-    Validation.default.minLength.mockReturnValue(false); // Mock it to be invalid
-    Validation.default.isRequired.mockReturnValue(true); // For other fields if any
+      const currentModel = reactive({ name: "J", email: "" }); // J is invalid (minLength 3)
+      const Validation = await import("../validation");
+      Validation.default.minLength.mockReturnValue(false); // Mock it to be invalid
+      Validation.default.isRequired.mockReturnValue(true); // For other fields if any
 
       const wrapper = createWrapper(onInputProps, currentModel);
       const nameInputVm = wrapper.findAllComponents(LocalStubInput).at(0).vm;
@@ -680,7 +680,10 @@ describe("PreskoForm.vue", () => {
       Validation = await import("../validation");
       // Default all validation rules to pass unless specified in a test
       Object.keys(Validation.default).forEach((key) => {
-        if (Validation.default[key] && typeof Validation.default[key].mockReturnValue === 'function') {
+        if (
+          Validation.default[key] &&
+          typeof Validation.default[key].mockReturnValue === "function"
+        ) {
           Validation.default[key].mockReturnValue(true);
         }
       });
@@ -688,7 +691,9 @@ describe("PreskoForm.vue", () => {
 
     it("should focus the first invalid field and scroll to it by default on submit failure", async () => {
       Validation.default.isRequired.mockImplementation((val) => !!val);
-      Validation.default.minLength.mockImplementation((val, params) => val && val.length >= params.min);
+      Validation.default.minLength.mockImplementation(
+        (val, params) => val && val.length >= params.min
+      );
 
       const model = reactive({ name: "J", email: "valid@example.com" }); // Name is invalid (minLength 3)
       const wrapper = createWrapper(
@@ -703,7 +708,7 @@ describe("PreskoForm.vue", () => {
       expect(nameFormItem.exists()).toBe(true);
 
       // Get the actual input element within the PreskoFormItem for 'name'
-      const nameInputEl = nameFormItem.element.querySelector('input');
+      const nameInputEl = nameFormItem.element.querySelector("input");
       expect(nameInputEl).toBeTruthy();
 
       const focusSpy = vi.spyOn(nameInputEl, "focus");
@@ -727,20 +732,22 @@ describe("PreskoForm.vue", () => {
 
     it("should scroll to but not focus the first invalid field if autoFocusOnError is false", async () => {
       Validation.default.isRequired.mockImplementation((val) => !!val);
-      Validation.default.minLength.mockImplementation((val, params) => val && val.length >= params.min);
+      Validation.default.minLength.mockImplementation(
+        (val, params) => val && val.length >= params.min
+      );
 
       const model = reactive({ name: "J", email: "valid@example.com" });
       const wrapper = createWrapper(
         {
           fields: getBaseFieldsConfig(),
-          autoFocusOnError: false
+          autoFocusOnError: false,
         },
         model
       );
       await nextTick();
 
       const nameFormItem = wrapper.findComponent('[data-pk-field="name"]');
-      const nameInputEl = nameFormItem.element.querySelector('input');
+      const nameInputEl = nameFormItem.element.querySelector("input");
       const focusSpy = vi.spyOn(nameInputEl, "focus");
       const scrollIntoViewSpy = vi.spyOn(nameInputEl, "scrollIntoView");
 
@@ -766,19 +773,18 @@ describe("PreskoForm.vue", () => {
       const wrapper = createWrapper(
         {
           fields: getBaseFieldsConfig(),
-          scrollToError: scrollToErrorMock
+          scrollToError: scrollToErrorMock,
         },
         model
       );
       await nextTick();
 
       const nameFormItem = wrapper.findComponent('[data-pk-field="name"]');
-      const nameInputEl = nameFormItem.element.querySelector('input');
+      const nameInputEl = nameFormItem.element.querySelector("input");
       // We are spying on the PreskoFormItem's element, but the callback receives the input
       const scrollIntoViewSpy = vi.spyOn(nameInputEl, "scrollIntoView");
       // The focus will still be called on the input element if autoFocusOnError is true (default)
-      const focusSpy = vi.spyOn(nameInputEl, 'focus');
-
+      const focusSpy = vi.spyOn(nameInputEl, "focus");
 
       await wrapper.find("form").trigger("submit.prevent");
       await nextTick();
@@ -823,7 +829,7 @@ describe("PreskoForm.vue", () => {
       const wrapper = createWrapper(
         {
           fields: getBaseFieldsConfig(),
-          errorAnnouncement: customErrorAnnouncement
+          errorAnnouncement: customErrorAnnouncement,
         },
         model
       );
@@ -857,7 +863,7 @@ describe("PreskoForm.vue", () => {
     });
 
     it("correctly focuses and scrolls to a nested field in a list", async () => {
-      Validation.default.isRequired.mockImplementation(val => !!val); // Empty string will fail
+      Validation.default.isRequired.mockImplementation((val) => !!val); // Empty string will fail
 
       const initialModel = {
         contacts: [
@@ -876,18 +882,26 @@ describe("PreskoForm.vue", () => {
       await nextTick(); // Allow PreskoForm to initialize, including formItemRefs population
 
       const targetPath = "contacts[0].name";
-      const formItemWrapper = wrapper.findComponent(`[data-pk-field="${targetPath}"]`);
-      expect(formItemWrapper.exists(), `PreskoFormItem for ${targetPath} should exist.`).toBe(true);
+      const formItemWrapper = wrapper.findComponent(
+        `[data-pk-field="${targetPath}"]`
+      );
+      expect(
+        formItemWrapper.exists(),
+        `PreskoFormItem for ${targetPath} should exist.`
+      ).toBe(true);
 
       const formItemEl = formItemWrapper.element;
-      const inputEl = formItemEl.querySelector('input');
-      expect(inputEl, `Input element within ${targetPath} should exist.`).toBeTruthy();
+      const inputEl = formItemEl.querySelector("input");
+      expect(
+        inputEl,
+        `Input element within ${targetPath} should exist.`
+      ).toBeTruthy();
 
       const focusSpy = vi.spyOn(inputEl, "focus");
-      const scrollIntoViewSpy = vi.spyOn(formItemEl, "scrollIntoView");
+      const scrollIntoViewSpy = vi.spyOn(inputEl, "scrollIntoView");
 
       // Make contacts[0].name invalid via the mock
-      Validation.default.isRequired.mockImplementation(val => {
+      Validation.default.isRequired.mockImplementation((val) => {
         if (val === initialModel.contacts[0].name) return false; // specifically make this one fail
         return !!val;
       });
@@ -897,13 +911,28 @@ describe("PreskoForm.vue", () => {
       vi.advanceTimersByTime(100); // For setTimeout in focus logic
       await nextTick(); // DOM updates
 
-      expect(wrapper.emitted()["submit:reject"], "submit:reject should be emitted").toBeTruthy();
+      expect(
+        wrapper.emitted()["submit:reject"],
+        "submit:reject should be emitted"
+      ).toBeTruthy();
       const rejectPayload = wrapper.emitted()["submit:reject"][0][0];
-      expect(rejectPayload.firstInvalidPath, "firstInvalidPath should be correct").toBe(targetPath);
-      expect(rejectPayload.firstInvalidEl, "firstInvalidEl should be the PreskoFormItem's root element").toBe(formItemEl);
+      expect(
+        rejectPayload.firstInvalidPath,
+        "firstInvalidPath should be correct"
+      ).toBe(targetPath);
+      expect(
+        rejectPayload.firstInvalidEl,
+        "firstInvalidEl should be the PreskoFormItem's root element"
+      ).toBe(formItemEl);
 
-      expect(scrollIntoViewSpy, "scrollIntoView on PreskoFormItem root should be called").toHaveBeenCalled();
-      expect(focusSpy, "focus on the inner input element should be called").toHaveBeenCalled();
+      expect(
+        scrollIntoViewSpy,
+        "scrollIntoView on the input element should be called"
+      ).toHaveBeenCalled();
+      expect(
+        focusSpy,
+        "focus on the inner input element should be called"
+      ).toHaveBeenCalled();
 
       focusSpy.mockRestore();
       scrollIntoViewSpy.mockRestore();

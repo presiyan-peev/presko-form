@@ -38,6 +38,9 @@
                 :submit-btn-props="props.submitBtnProps"
                 :validation-trigger="props.validationTrigger"
                 :input-debounce-ms="props.inputDebounceMs"
+                :external-validation-state="validationState"
+                :path-prefix="`${props.pathPrefix}${field.subForm}.`"
+                :is-nested-form="true"
                 @update:modelValue="
                   (value) => handleSubFormModelUpdate(field.subForm, value)
                 "
@@ -81,7 +84,7 @@
                         (el) => {
                           if (el)
                             formItemRefs[
-                              `${field.propertyName}[${index}].${listItemField.propertyName}`
+                              `${props.pathPrefix}${field.propertyName}[${index}].${listItemField.propertyName}`
                             ] = el;
                         }
                       "
@@ -99,24 +102,24 @@
                       :error-props="props.errorProps"
                       :isTouched="
                         formFieldsTouchedState[
-                          `${field.propertyName}[${index}].${listItemField.propertyName}`
+                          `${props.pathPrefix}${field.propertyName}[${index}].${listItemField.propertyName}`
                         ] || false
                       "
                       :isDirty="
                         formFieldsDirtyState[
-                          `${field.propertyName}[${index}].${listItemField.propertyName}`
+                          `${props.pathPrefix}${field.propertyName}[${index}].${listItemField.propertyName}`
                         ] || false
                       "
                       :fieldStateProps="props.fieldStateProps"
-                      :fieldPath="`${field.propertyName}[${index}].${listItemField.propertyName}`"
+                      :fieldPath="`${props.pathPrefix}${field.propertyName}[${index}].${listItemField.propertyName}`"
                       :validity-state="{
                         hasErrors:
                           formFieldsValidity[
-                            `${field.propertyName}[${index}].${listItemField.propertyName}`
+                            `${props.pathPrefix}${field.propertyName}[${index}].${listItemField.propertyName}`
                           ] === false,
                         errMsg:
                           formFieldsErrorMessages[
-                            `${field.propertyName}[${index}].${listItemField.propertyName}`
+                            `${props.pathPrefix}${field.propertyName}[${index}].${listItemField.propertyName}`
                           ],
                       }"
                       @field-blurred="
@@ -143,7 +146,9 @@
                 v-else-if="field.propertyName"
                 :ref="
                   (el) => {
-                    if (el) formItemRefs[field.propertyName] = el;
+                    if (el)
+                      formItemRefs[`${props.pathPrefix}${field.propertyName}`] =
+                        el;
                   }
                 "
                 :modelValue="modelValue[field.propertyName]"
@@ -152,13 +157,27 @@
                 "
                 :field="field"
                 :error-props="props.errorProps"
-                :isTouched="formFieldsTouchedState[field.propertyName] || false"
-                :isDirty="formFieldsDirtyState[field.propertyName] || false"
+                :isTouched="
+                  formFieldsTouchedState[
+                    `${props.pathPrefix}${field.propertyName}`
+                  ] || false
+                "
+                :isDirty="
+                  formFieldsDirtyState[
+                    `${props.pathPrefix}${field.propertyName}`
+                  ] || false
+                "
                 :fieldStateProps="props.fieldStateProps"
-                :fieldPath="field.propertyName"
+                :fieldPath="`${props.pathPrefix}${field.propertyName}`"
                 :validity-state="{
-                  hasErrors: formFieldsValidity[field.propertyName] === false,
-                  errMsg: formFieldsErrorMessages[field.propertyName],
+                  hasErrors:
+                    formFieldsValidity[
+                      `${props.pathPrefix}${field.propertyName}`
+                    ] === false,
+                  errMsg:
+                    formFieldsErrorMessages[
+                      `${props.pathPrefix}${field.propertyName}`
+                    ],
                 }"
                 @field-blurred="
                   (emittedPropertyName) =>
@@ -334,6 +353,38 @@ const props = defineProps({
     type: String,
     default: "Please correct the highlighted field",
   },
+
+  // NEW PROPS FOR MASTER STATE MANAGEMENT
+  /**
+   * External validation state management (used by nested forms).
+   * When provided, this form will use the external state instead of creating its own.
+   * @type {Object | null}
+   * @default null
+   */
+  externalValidationState: {
+    type: Object,
+    default: null,
+  },
+
+  /**
+   * Path prefix for nested forms (used internally for state management).
+   * @type {string}
+   * @default ""
+   */
+  pathPrefix: {
+    type: String,
+    default: "",
+  },
+
+  /**
+   * Whether this is a nested form (used internally).
+   * @type {boolean}
+   * @default false
+   */
+  isNestedForm: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits([
@@ -443,7 +494,14 @@ const initializeModel = (fieldsToInit) => {
 // Initialize model immediately with current fields
 initializeModel(props.fields);
 
-// Initialize form validation composable
+// Initialize form validation composable or use external state
+const validationState =
+  props.externalValidationState ||
+  useFormValidation(props.fields, {
+    validationTrigger: props.validationTrigger,
+    inputDebounceMs: props.inputDebounceMs,
+  });
+
 const {
   formFieldsValues, // Internal reactive state for values in useFormValidation
   formFieldsValidity,
@@ -455,10 +513,7 @@ const {
   checkFieldDirty,
   updateFieldInitialValue,
   triggerValidation,
-} = useFormValidation(props.fields, {
-  validationTrigger: props.validationTrigger,
-  inputDebounceMs: props.inputDebounceMs,
-});
+} = validationState;
 
 // Watch for changes in the modelValue to update initial values for dirty checking
 // and to check dirty state on subsequent changes.
@@ -529,15 +584,17 @@ watch(
  * @param {string} propertyName - The `propertyName` of the field that was blurred.
  */
 const handleFieldBlurred = (propertyName) => {
-  const touchedChanged = setFieldTouched(propertyName, true);
-  if (touchedChanged) {
+  const fullPath = `${props.pathPrefix}${propertyName}`;
+  const touchedChanged = setFieldTouched(fullPath, true);
+  if (touchedChanged && !props.isNestedForm) {
+    // Only emit events from the root form to avoid duplicates
     emit("field:touched", {
-      propertyName,
-      touched: formFieldsTouchedState[propertyName], // Emit the reactive state
+      propertyName: fullPath,
+      touched: formFieldsTouchedState[fullPath], // Emit the reactive state
     });
   }
   if (typeof triggerValidation === "function") {
-    triggerValidation(propertyName, "blur", modelValue.value);
+    triggerValidation(fullPath, "blur", modelValue.value);
   }
 };
 
@@ -548,7 +605,8 @@ const handleFieldBlurred = (propertyName) => {
  */
 const handleFieldInput = (propertyName) => {
   if (typeof triggerValidation === "function") {
-    triggerValidation(propertyName, "input", modelValue.value);
+    const fullPath = `${props.pathPrefix}${propertyName}`;
+    triggerValidation(fullPath, "input", modelValue.value);
   }
 };
 
@@ -564,25 +622,28 @@ const handleFieldInput = (propertyName) => {
  * @param {boolean} eventData.dirty - The new dirty state (for 'field:dirty').
  */
 const handleSubFormEvent = (eventName, subFormKey, eventData) => {
-  const fullPropertyName = `${subFormKey}.${eventData.propertyName}`;
+  const fullPropertyName = `${props.pathPrefix}${subFormKey}.${eventData.propertyName}`;
   if (eventName === "field:touched") {
-    if (setFieldTouched(subFormKey, true)) {
-      // Mark the sub-form container as touched
-      emit("field:touched", { propertyName: subFormKey, touched: true });
+    // Mark the sub-form container as touched in master state
+    const subFormPath = `${props.pathPrefix}${subFormKey}`;
+    if (setFieldTouched(subFormPath, true) && !props.isNestedForm) {
+      emit("field:touched", { propertyName: subFormPath, touched: true });
     }
-    emit("field:touched", {
-      // Relay the granular event
-      propertyName: fullPropertyName,
-      touched: eventData.touched,
-    });
+    // Emit the granular event with full path for backward compatibility
+    if (!props.isNestedForm) {
+      emit("field:touched", {
+        propertyName: fullPropertyName,
+        touched: eventData.touched,
+      });
+    }
   } else if (eventName === "field:dirty") {
-    // For sub-form dirty state, PreskoForm primarily relies on changes to its modelValue.
-    // However, emitting granular dirty events can be useful for consumers.
-    // The sub-form container's dirty state is managed by `checkFieldDirty` on `modelValue.value` changes.
-    emit("field:dirty", {
-      propertyName: fullPropertyName,
-      dirty: eventData.dirty,
-    });
+    // Emit granular dirty events for backward compatibility
+    if (!props.isNestedForm) {
+      emit("field:dirty", {
+        propertyName: fullPropertyName,
+        dirty: eventData.dirty,
+      });
+    }
   }
 };
 
@@ -591,6 +652,13 @@ const handleSubFormEvent = (eventName, subFormKey, eventData) => {
  * @type {import('vue').ComputedRef<boolean>}
  */
 const isFormDirty = computed(() => {
+  // For nested forms, check only fields that belong to this form's path prefix
+  if (props.isNestedForm) {
+    return Object.keys(formFieldsDirtyState).some(
+      (path) =>
+        path.startsWith(props.pathPrefix) && formFieldsDirtyState[path] === true
+    );
+  }
   return Object.values(formFieldsDirtyState).some((state) => state === true);
 });
 
@@ -599,6 +667,14 @@ const isFormDirty = computed(() => {
  * @type {import('vue').ComputedRef<boolean>}
  */
 const isFormTouched = computed(() => {
+  // For nested forms, check only fields that belong to this form's path prefix
+  if (props.isNestedForm) {
+    return Object.keys(formFieldsTouchedState).some(
+      (path) =>
+        path.startsWith(props.pathPrefix) &&
+        formFieldsTouchedState[path] === true
+    );
+  }
   return Object.values(formFieldsTouchedState).some((state) => state === true);
 });
 
@@ -615,11 +691,13 @@ const handleFormSubmit = () => {
     props.fields.forEach((field) => {
       const key = field.propertyName || field.subForm;
       if (key) {
+        const fullPath = `${props.pathPrefix}${key}`;
         // Mark the top-level field as touched
-        if (setFieldTouched(key, true)) {
+        if (setFieldTouched(fullPath, true) && !props.isNestedForm) {
+          // Only emit events from the root form to avoid duplicates
           emit("field:touched", {
-            propertyName: key,
-            touched: formFieldsTouchedState[key],
+            propertyName: fullPath,
+            touched: formFieldsTouchedState[fullPath],
           });
         }
 
@@ -633,8 +711,12 @@ const handleFormSubmit = () => {
             if (Array.isArray(field.fields)) {
               field.fields.forEach((listItemField) => {
                 if (listItemField.propertyName) {
-                  const nestedFieldPath = `${field.propertyName}[${index}].${listItemField.propertyName}`;
-                  if (setFieldTouched(nestedFieldPath, true)) {
+                  const nestedFieldPath = `${props.pathPrefix}${field.propertyName}[${index}].${listItemField.propertyName}`;
+                  if (
+                    setFieldTouched(nestedFieldPath, true) &&
+                    !props.isNestedForm
+                  ) {
+                    // Only emit events from the root form to avoid duplicates
                     emit("field:touched", {
                       propertyName: nestedFieldPath,
                       touched: formFieldsTouchedState[nestedFieldPath],
@@ -722,7 +804,7 @@ const handleFormSubmit = () => {
                 // Skip non-visible list item fields
                 if (!isFieldVisible(listItemField)) return;
                 fieldsToIterate.push({
-                  path: `${field.propertyName}[${i}].${listItemField.propertyName}`,
+                  path: `${props.pathPrefix}${field.propertyName}[${i}].${listItemField.propertyName}`,
                   fieldDef: listItemField,
                 });
               });
@@ -731,12 +813,15 @@ const handleFormSubmit = () => {
         } else if (field.subForm) {
           // Add subform itself for potential direct errors on the subform object
           fieldsToIterate.push({
-            path: field.subForm,
+            path: `${props.pathPrefix}${field.subForm}`,
             fieldDef: field,
             isSubFormContainer: true,
           });
         } else if (field.propertyName) {
-          fieldsToIterate.push({ path: field.propertyName, fieldDef: field });
+          fieldsToIterate.push({
+            path: `${props.pathPrefix}${field.propertyName}`,
+            fieldDef: field,
+          });
         }
       });
     }
@@ -760,9 +845,9 @@ const handleFormSubmit = () => {
         if (
           field.subForm &&
           isFieldVisible(field) &&
-          formFieldsValidity[field.subForm] === false
+          formFieldsValidity[`${props.pathPrefix}${field.subForm}`] === false
         ) {
-          firstInvalidPath = field.subForm;
+          firstInvalidPath = `${props.pathPrefix}${field.subForm}`;
           // firstInvalidEl will remain null as we expect sub-form to handle its internal focus
           break;
         }
@@ -777,59 +862,63 @@ const handleFormSubmit = () => {
     const formItemElement = firstInvalidEl;
 
     if (formItemElement) {
-      // Scroll logic should target the PreskoFormItem's root element.
+      // Find the focusable element first, as we want to scroll to the same element we'll focus
+      let focusableElementToTarget = null;
+      const preskoItemInstance = formItemRefs.value[firstInvalidPath];
+
+      if (
+        preskoItemInstance &&
+        typeof preskoItemInstance.interactiveElement !== "undefined"
+      ) {
+        // interactiveElement is a computed ref, so access its .value
+        // and ensure it's not null before attempting to use it.
+        const exposedInteractiveElement =
+          preskoItemInstance.interactiveElement.value;
+        if (exposedInteractiveElement) {
+          focusableElementToTarget = exposedInteractiveElement;
+        }
+      }
+
+      // Fallback if PreskoFormItem doesn't expose interactiveElement or it's null
+      if (!focusableElementToTarget && formItemElement.querySelector) {
+        focusableElementToTarget = formItemElement.querySelector(
+          'input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])'
+        );
+      } else if (
+        !focusableElementToTarget &&
+        typeof formItemElement.focus === "function" &&
+        !formItemElement.disabled
+      ) {
+        // If the formItemElement itself is focusable (e.g. if it were an input directly, though it's a div)
+        focusableElementToTarget = formItemElement;
+      }
+
+      // Determine which element to scroll to - prefer the focusable element, fallback to form item
+      const elementToScrollTo = focusableElementToTarget || formItemElement;
+
+      // Handle scrolling
       if (typeof props.scrollToError === "function") {
-        props.scrollToError(formItemElement);
-      } else if (typeof formItemElement.scrollIntoView === "function") {
-        formItemElement.scrollIntoView({
+        props.scrollToError(formItemElement); // Custom callback still gets the form item element
+      } else if (typeof elementToScrollTo.scrollIntoView === "function") {
+        elementToScrollTo.scrollIntoView({
           behavior: "smooth",
           block: "center",
         });
       }
 
-      if (props.autoFocusOnError) {
-        let focusableElementToTarget = null;
-        const preskoItemInstance = formItemRefs.value[firstInvalidPath];
-
-        if (
-          preskoItemInstance &&
-          typeof preskoItemInstance.interactiveElement !== "undefined"
-        ) {
-          // interactiveElement is a computed ref, so access its .value
-          // and ensure it's not null before attempting to use it.
-          const exposedInteractiveElement =
-            preskoItemInstance.interactiveElement.value;
-          if (exposedInteractiveElement) {
-            focusableElementToTarget = exposedInteractiveElement;
+      // Handle focusing
+      if (
+        props.autoFocusOnError &&
+        focusableElementToTarget &&
+        typeof focusableElementToTarget.focus === "function"
+      ) {
+        setTimeout(() => {
+          try {
+            focusableElementToTarget.focus({ preventScroll: true });
+          } catch (e) {
+            // console.error("Focus failed:", e);
           }
-        }
-
-        // Fallback if PreskoFormItem doesn't expose interactiveElement or it's null
-        if (!focusableElementToTarget && formItemElement.querySelector) {
-          focusableElementToTarget = formItemElement.querySelector(
-            'input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])'
-          );
-        } else if (
-          !focusableElementToTarget &&
-          typeof formItemElement.focus === "function" &&
-          !formItemElement.disabled
-        ) {
-          // If the formItemElement itself is focusable (e.g. if it were an input directly, though it's a div)
-          focusableElementToTarget = formItemElement;
-        }
-
-        if (
-          focusableElementToTarget &&
-          typeof focusableElementToTarget.focus === "function"
-        ) {
-          setTimeout(() => {
-            try {
-              focusableElementToTarget.focus({ preventScroll: true });
-            } catch (e) {
-              // console.error("Focus failed:", e);
-            }
-          }, 100);
-        }
+        }, 100);
       }
     }
   }
@@ -967,9 +1056,10 @@ const handleListItemFieldModelUpdate = (
  * @param {string} itemFieldName - The propertyName of the field within the list item.
  */
 const handleListItemFieldBlurred = (listName, itemIndex, itemFieldName) => {
-  const fullPath = `${listName}[${itemIndex}].${itemFieldName}`;
+  const fullPath = `${props.pathPrefix}${listName}[${itemIndex}].${itemFieldName}`;
   const touchedChanged = setFieldTouched(fullPath, true);
-  if (touchedChanged) {
+  if (touchedChanged && !props.isNestedForm) {
+    // Only emit events from the root form to avoid duplicates
     emit("field:touched", {
       propertyName: fullPath,
       touched: formFieldsTouchedState[fullPath],
