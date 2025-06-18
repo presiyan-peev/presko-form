@@ -65,7 +65,7 @@ F-4 Helpers
  • `revertChanges()` – restore all fields to initial snapshot.  
  • `getState()` – return immutable snapshot (useful for route-guards).
 F-5 Composable `useFormStatus(formRef, { debounce?: number })` returns reactive aggregates and helpers.
-F-6 TypeScript Provide full typings, generic over form model.
+F-6 JSDoc Provide comprehensive JSDoc documentation with type annotations for all functions and objects.
 F-7 Documentation Cookbook section "Unsaved changes banner", "Disable Save until dirty".
 
 ## 8 · Non-Functional Requirements
@@ -76,7 +76,7 @@ F-7 Documentation Cookbook section "Unsaved changes banner", "Disable Save until
 
 ## 9 · API Changes (Draft)
 
-```ts
+```js
 // inside useFormValidation return value (breaking change minor)
 {
   ...previous,
