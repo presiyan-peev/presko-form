@@ -610,16 +610,39 @@ const isFormTouched = computed(() => {
  * Emits 'submit' with the deep cloned form data if valid, or 'submit:reject' if invalid.
  */
 const handleFormSubmit = () => {
-  // Mark all fields (including sub-form containers) of this form instance as touched.
+  // Mark all fields (including sub-form containers and nested list fields) as touched.
   if (props.fields && Array.isArray(props.fields)) {
     props.fields.forEach((field) => {
       const key = field.propertyName || field.subForm;
       if (key) {
-        // Ensure key exists
+        // Mark the top-level field as touched
         if (setFieldTouched(key, true)) {
           emit("field:touched", {
             propertyName: key,
-            touched: formFieldsTouchedState[key], // Emit current reactive state
+            touched: formFieldsTouchedState[key],
+          });
+        }
+
+        // If this is a list field, also mark all its nested item fields as touched
+        if (
+          field.type === "list" &&
+          field.propertyName &&
+          Array.isArray(modelValue.value[field.propertyName])
+        ) {
+          modelValue.value[field.propertyName].forEach((_item, index) => {
+            if (Array.isArray(field.fields)) {
+              field.fields.forEach((listItemField) => {
+                if (listItemField.propertyName) {
+                  const nestedFieldPath = `${field.propertyName}[${index}].${listItemField.propertyName}`;
+                  if (setFieldTouched(nestedFieldPath, true)) {
+                    emit("field:touched", {
+                      propertyName: nestedFieldPath,
+                      touched: formFieldsTouchedState[nestedFieldPath],
+                    });
+                  }
+                }
+              });
+            }
           });
         }
       }
@@ -688,9 +711,7 @@ const handleFormSubmit = () => {
         // Skip non-visible top-level fields early
         if (!isFieldVisible(field)) return;
 
-        if (field.propertyName) {
-          fieldsToIterate.push({ path: field.propertyName, fieldDef: field });
-        } else if (
+        if (
           field.type === "list" &&
           field.propertyName &&
           Array.isArray(modelValue.value[field.propertyName])
@@ -714,6 +735,8 @@ const handleFormSubmit = () => {
             fieldDef: field,
             isSubFormContainer: true,
           });
+        } else if (field.propertyName) {
+          fieldsToIterate.push({ path: field.propertyName, fieldDef: field });
         }
       });
     }
@@ -760,7 +783,7 @@ const handleFormSubmit = () => {
       } else if (typeof formItemElement.scrollIntoView === "function") {
         formItemElement.scrollIntoView({
           behavior: "smooth",
-          block: "nearest",
+          block: "center",
         });
       }
 
@@ -775,7 +798,7 @@ const handleFormSubmit = () => {
           // interactiveElement is a computed ref, so access its .value
           // and ensure it's not null before attempting to use it.
           const exposedInteractiveElement =
-            preskoItemInstance.interactiveElement;
+            preskoItemInstance.interactiveElement.value;
           if (exposedInteractiveElement) {
             focusableElementToTarget = exposedInteractiveElement;
           }
@@ -801,11 +824,11 @@ const handleFormSubmit = () => {
         ) {
           setTimeout(() => {
             try {
-              focusableElementToTarget.focus();
+              focusableElementToTarget.focus({ preventScroll: true });
             } catch (e) {
               // console.error("Focus failed:", e);
             }
-          }, 50);
+          }, 100);
         }
       }
     }
