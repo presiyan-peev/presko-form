@@ -77,7 +77,14 @@
                     <PreskoFormItem
                       v-for="listItemField in field.fields"
                       :key="listItemField.propertyName"
-                      :ref="(el) => { if (el) formItemRefs[`${field.propertyName}[${index}].${listItemField.propertyName}`] = el; }"
+                      :ref="
+                        (el) => {
+                          if (el)
+                            formItemRefs[
+                              `${field.propertyName}[${index}].${listItemField.propertyName}`
+                            ] = el;
+                        }
+                      "
                       :modelValue="item[listItemField.propertyName]"
                       @update:modelValue="
                         (value) =>
@@ -134,7 +141,11 @@
               <!-- Regular Field Rendering -->
               <PreskoFormItem
                 v-else-if="field.propertyName"
-                :ref="(el) => { if (el) formItemRefs[field.propertyName] = el; }"
+                :ref="
+                  (el) => {
+                    if (el) formItemRefs[field.propertyName] = el;
+                  }
+                "
                 :modelValue="modelValue[field.propertyName]"
                 @update:modelValue="
                   (value) => handleFieldModelUpdate(field.propertyName, value)
@@ -673,25 +684,36 @@ const handleFormSubmit = () => {
     // Flatten fields to respect defined order, including list items
     const fieldsToIterate = [];
     if (props.fields && Array.isArray(props.fields)) {
-      props.fields.forEach(field => {
+      props.fields.forEach((field) => {
         // Skip non-visible top-level fields early
         if (!isFieldVisible(field)) return;
 
         if (field.propertyName) {
           fieldsToIterate.push({ path: field.propertyName, fieldDef: field });
-        } else if (field.type === 'list' && field.propertyName && Array.isArray(modelValue.value[field.propertyName])) {
+        } else if (
+          field.type === "list" &&
+          field.propertyName &&
+          Array.isArray(modelValue.value[field.propertyName])
+        ) {
           modelValue.value[field.propertyName].forEach((_item, i) => {
             if (Array.isArray(field.fields)) {
-              field.fields.forEach(listItemField => {
+              field.fields.forEach((listItemField) => {
                 // Skip non-visible list item fields
                 if (!isFieldVisible(listItemField)) return;
-                fieldsToIterate.push({ path: `${field.propertyName}[${i}].${listItemField.propertyName}`, fieldDef: listItemField });
+                fieldsToIterate.push({
+                  path: `${field.propertyName}[${i}].${listItemField.propertyName}`,
+                  fieldDef: listItemField,
+                });
               });
             }
           });
         } else if (field.subForm) {
           // Add subform itself for potential direct errors on the subform object
-           fieldsToIterate.push({ path: field.subForm, fieldDef: field, isSubFormContainer: true });
+          fieldsToIterate.push({
+            path: field.subForm,
+            fieldDef: field,
+            isSubFormContainer: true,
+          });
         }
       });
     }
@@ -700,8 +722,8 @@ const handleFormSubmit = () => {
       if (formFieldsValidity[path] === false) {
         firstInvalidPath = path;
         if (!isSubFormContainer) {
-            const itemRef = formItemRefs.value[path];
-            firstInvalidEl = itemRef?.$el || itemRef;
+          const itemRef = formItemRefs.value[path];
+          firstInvalidEl = itemRef?.$el || itemRef;
         }
         // else for isSubFormContainer, firstInvalidEl remains null, sub-form handles its own focus.
         break;
@@ -711,13 +733,17 @@ const handleFormSubmit = () => {
     // This secondary check for subForm errors is more of a fallback,
     // if the primary iteration didn't catch a subForm container marked invalid.
     if (!firstInvalidPath && props.fields && Array.isArray(props.fields)) {
-        for (const field of props.fields) {
-            if (field.subForm && isFieldVisible(field) && formFieldsValidity[field.subForm] === false) {
-                firstInvalidPath = field.subForm;
-                // firstInvalidEl will remain null as we expect sub-form to handle its internal focus
-                break;
-            }
+      for (const field of props.fields) {
+        if (
+          field.subForm &&
+          isFieldVisible(field) &&
+          formFieldsValidity[field.subForm] === false
+        ) {
+          firstInvalidPath = field.subForm;
+          // firstInvalidEl will remain null as we expect sub-form to handle its internal focus
+          break;
         }
+      }
     }
 
     emit("submit:reject", { firstInvalidPath, firstInvalidEl });
@@ -732,17 +758,24 @@ const handleFormSubmit = () => {
       if (typeof props.scrollToError === "function") {
         props.scrollToError(formItemElement);
       } else if (typeof formItemElement.scrollIntoView === "function") {
-        formItemElement.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        formItemElement.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
       }
 
       if (props.autoFocusOnError) {
         let focusableElementToTarget = null;
         const preskoItemInstance = formItemRefs.value[firstInvalidPath];
 
-        if (preskoItemInstance && typeof preskoItemInstance.interactiveElement !== 'undefined') {
+        if (
+          preskoItemInstance &&
+          typeof preskoItemInstance.interactiveElement !== "undefined"
+        ) {
           // interactiveElement is a computed ref, so access its .value
           // and ensure it's not null before attempting to use it.
-          const exposedInteractiveElement = preskoItemInstance.interactiveElement;
+          const exposedInteractiveElement =
+            preskoItemInstance.interactiveElement;
           if (exposedInteractiveElement) {
             focusableElementToTarget = exposedInteractiveElement;
           }
@@ -750,13 +783,22 @@ const handleFormSubmit = () => {
 
         // Fallback if PreskoFormItem doesn't expose interactiveElement or it's null
         if (!focusableElementToTarget && formItemElement.querySelector) {
-          focusableElementToTarget = formItemElement.querySelector('input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])');
-        } else if (!focusableElementToTarget && typeof formItemElement.focus === 'function' && !formItemElement.disabled) {
+          focusableElementToTarget = formItemElement.querySelector(
+            'input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])'
+          );
+        } else if (
+          !focusableElementToTarget &&
+          typeof formItemElement.focus === "function" &&
+          !formItemElement.disabled
+        ) {
           // If the formItemElement itself is focusable (e.g. if it were an input directly, though it's a div)
           focusableElementToTarget = formItemElement;
         }
 
-        if (focusableElementToTarget && typeof focusableElementToTarget.focus === 'function') {
+        if (
+          focusableElementToTarget &&
+          typeof focusableElementToTarget.focus === "function"
+        ) {
           setTimeout(() => {
             try {
               focusableElementToTarget.focus();
@@ -934,9 +976,9 @@ const isFieldVisible = (field) => {
 
 // Expose methods for parent components, e.g., for programmatic submission.
 defineExpose({
-  handleFormSubmit,
-  handleAddItem,
-  handleRemoveItem,
+  submit: handleFormSubmit,
+  addItem: handleAddItem,
+  removeItem: handleRemoveItem,
 });
 </script>
 
