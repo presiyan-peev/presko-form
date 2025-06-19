@@ -12,11 +12,12 @@ A Vue.js library for effortlessly creating dynamic forms with powerful built-in 
 - **Flexible Component System:** Integrate your own custom Vue components for form inputs.
 - **Built-in Validation Rules:** Includes common rules like `required`, `email`, `domain`, IP formats, and regex matching.
 - **Customizable Validation:** Define custom validation logic and error messages.
+- **Asynchronous Validation:** Support for async validators (e.g., server-side checks) with pending states and abort signals.
 - **Nested Forms (Sub-Forms):** Structure complex forms by nesting configurations.
 - **Clear Event Handling:** Manage form submissions with `@submit` and validation failures with `@submit:reject`.
 - **Field Interaction States:** Track and react to `isTouched` and `isDirty` states for individual fields and the overall form.
 - **Customizable Props:** Configure prop names for error display and field states to integrate with existing component libraries.
-- **Scoped Slots:** Provides `isFormDirty` and `isFormTouched` states to default and submit row slots for enhanced UI customization.
+- **Scoped Slots:** Provides `isFormDirty`, `isFormTouched`, and `isFormPending` states to default and submit row slots for enhanced UI customization.
 - **Vue 3 Composition API:** Modern, lightweight, and composable architecture.
 
 ## Installation
@@ -263,15 +264,24 @@ The `fields` prop is an array of objects, where each object configures a field i
   - It's typically passed within the `props` object to your input component, e.g., `props: { label: 'Username' }`. The `useFormValidation` composable can use `field.label` or `field.props.label` in default error messages.
 
 - **`validators`** (Array of Functions, optional)
-  - For more complex or custom validation logic not covered by built-in rules or simple regex. Each function in the array receives the field's current value as an argument.
+  - For more complex or custom validation logic not covered by built-in rules or simple regex. Each function in the array receives up to four arguments:
+    1.  `value`: The current value of the field.
+    2.  `label`: The field's label (resolved from `field.label` or `field.props.label`).
+    3.  `field`: The field's configuration object.
+    4.  `ctx` (ValidationContext): An object containing utilities for advanced validation, such as `abortSignal` for async operations and `getValue()` for accessing other field values. (See "Asynchronous Validation" section for details on `ctx`).
   - The function should return:
     - `true` if the value is valid.
     - A string containing the error message if the value is invalid.
     - `undefined` or `null` if the validation doesn't apply or passes (treated as valid).
+  - Validators can also be `async` and return a `Promise<true | string | string[]>`.
   - Example:
     ```javascript
     validators: [
       (value) => value === "expectedValue" || 'Value must be "expectedValue".',
+      async (value, label, field, ctx) => { // Example of async validator
+        // ... (see Asynchronous Validation section)
+        return true;
+      }
     ];
     ```
 
@@ -327,13 +337,14 @@ These rules are sourced from `src/validation/index.js`. The default error messag
 For validation logic that goes beyond the built-in rules or simple regex, you can use the `validators` array in a field's configuration.
 
 - Each element in the `validators` array should be a function.
-- This function receives the current value of the field as its argument.
+- This function receives up to four arguments: `value`, `label`, `fieldConfig`, and `validationContext` (see "Asynchronous Validation" for details on `validationContext`).
 - The function should return:
   - `true` if the validation passes.
   - A `String` (the error message) if the validation fails.
   - `undefined` or `null` is also treated as a pass.
+- **Asynchronous Validators**: Validators can be `async` functions and return a `Promise` that resolves to `true` (valid) or an error message string (invalid). See the "Asynchronous Validation" section for details.
 
-**Example:**
+**Example (Synchronous):**
 
 ```javascript
 fields: [
@@ -361,7 +372,150 @@ fields: [
 ];
 ```
 
-Validation is triggered on form submission. The `PreskoFormItem` component (which wraps your input components) receives the validation status and error messages, which can then be displayed. How errors are displayed can be influenced by the `errorProps` prop on `PreskoForm`.
+Validation is triggered based on the `validationTrigger` option (`onBlur` by default) and on form submission. The `PreskoFormItem` component (which wraps your input components) receives the validation status and error messages, which can then be displayed. How errors are displayed can be influenced by the `errorProps` prop on `PreskoForm`.
+
+## Asynchronous Validation
+
+PreskoForm supports asynchronous validation rules, allowing for use cases like server-side checks (e.g., "is this email already taken?") or complex cross-field validations that might involve asynchronous logic.
+
+### Writing Asynchronous Validators
+
+Validators can be `async` functions that return a `Promise`. The promise should resolve to:
+- `true`: If the validation is successful.
+- `string` or `string[]`: An error message (or array of messages) if the validation fails.
+
+When an async validator is in progress, the field and form will enter a pending state.
+
+**Example: Checking if an email is already taken**
+```javascript
+// Example field configuration
+{
+  propertyName: 'email',
+  label: 'Email',
+  component: 'AppInput', // Your custom input component
+  validators: [
+    async (value, label, field, ctx) => {
+      if (!value) return true; // Let 'required' rule handle empty values if needed
+
+      // If a previous validation for this field is running, ctx.abortSignal might be aborted.
+      if (ctx.abortSignal.aborted) {
+        console.log('Email validation aborted early.');
+        return true; // Or a specific message indicating cancellation
+      }
+
+      try {
+        const response = await fetch(`/api/check-email?email=${encodeURIComponent(value)}`, {
+          signal: ctx.abortSignal // Pass the abort signal to fetch
+        });
+
+        if (ctx.abortSignal.aborted) { // Check again after await
+          console.log('Email validation aborted during fetch.');
+          return true;
+        }
+
+        if (response.status === 409) { // Conflict
+          return 'This email is already taken.';
+        }
+        if (!response.ok) {
+          // You might want to inspect response.status or response.json() for more specific messages
+          return 'Could not validate email. Please try again.';
+        }
+        return true; // Email is available
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          console.log('Email validation aborted by AbortError.');
+          // Typically, return true or a non-blocking message if aborted,
+          // as another validation has superseded this one or the form is being reset.
+          return true;
+        }
+        // Handle other network errors or unexpected issues
+        console.error('Email validation error:', error);
+        return 'An unexpected error occurred during email validation.';
+      }
+    }
+  ],
+  rules: ['required', 'email'] // Combine with synchronous rules
+}
+```
+
+### `ValidationCtx` Object
+
+When you define a validator function, it can accept a fourth argument, `ctx` (Validation Context). This object provides utilities for advanced validation scenarios:
+
+- **`ctx.abortSignal`** (`AbortSignal`)
+  - An `AbortSignal` instance that is aborted when:
+    - A new validation run for the same field starts (e.g., due to rapid input changes).
+    - The form or field is reset or unmounted.
+  - You should pass this signal to any asynchronous operations (like `fetch`) to allow them to be cancelled, preventing outdated results and unnecessary processing.
+
+- **`ctx.getValue(fieldPath: string): any`**
+  - A function that allows you to retrieve the current value of any other field in the form. `fieldPath` is the `propertyName` of the other field (e.g., `'password'`, `'profile.firstName'`).
+  - This is useful for implementing cross-field validation rules.
+
+  **Example: Password Confirmation**
+  ```javascript
+  // In your fields configuration:
+  {
+    propertyName: 'password',
+    component: 'AppInput',
+    props: { label: 'Password', type: 'password' },
+    rules: ['required', { name: 'minLength', params: { min: 8 } }]
+  },
+  {
+    propertyName: 'confirmPassword',
+    component: 'AppInput',
+    props: { label: 'Confirm Password', type: 'password' },
+    rules: ['required'],
+    validators: [
+      (value, label, field, ctx) => {
+        const password = ctx.getValue('password'); // Get the value of the 'password' field
+        return value === password ? true : 'Passwords do not match.';
+      }
+    ]
+  }
+  ```
+
+### UI Feedback for Pending State
+
+PreskoForm provides mechanisms to give users feedback when asynchronous operations are in progress:
+
+- **`isFormPending` State**:
+  - The `PreskoForm` component makes an `isFormPending` boolean state available to its default and `submit-row` scoped slots. This is `true` if any field in the form is currently undergoing asynchronous validation.
+  - You can use this to disable the submit button or show a global loading indicator for the form.
+
+  ```vue
+  <PreskoForm v-model="formData" :fields="formFields" submit-component="AppButton">
+    <template #submit-row="{ isFormDirty, isFormTouched, isFormPending }">
+      <AppButton type="submit" :disabled="isFormPending || !isFormDirty">
+        <span v-if="isFormPending">Validating...</span>
+        <span v-else>Submit</span>
+      </AppButton>
+    </template>
+  </PreskoForm>
+  ```
+  - `isFormPending` is also exposed via `defineExpose` on the `PreskoForm` instance, so parent components can access it using a template ref.
+
+- **`field:pending` Event**:
+  - `PreskoForm` emits a `field:pending` event whenever a field's asynchronous validation status changes.
+  - The event payload is an object: `{ propertyName: string, pending: boolean }`, where `propertyName` is the full path to the field.
+
+- **`PreskoFormItem`'s `isPending` Prop and `aria-busy`**:
+  - The internal `PreskoFormItem` component (which wraps your actual input components) receives an `isPending` prop reflecting the pending state of the specific field it renders.
+  - `PreskoFormItem` automatically binds `aria-busy="true"` to the input component it renders when `isPending` is true.
+  - If your custom input component (e.g., `AppInput`) uses `v-bind="$attrs"` on its native `<input>` element, `aria-busy` will be applied correctly.
+  - You can use this attribute for CSS styling:
+    ```css
+    input[aria-busy="true"] {
+      /* Example: style for pending input */
+      opacity: 0.7;
+      cursor: wait;
+    }
+    ```
+  - Alternatively, you can pass the `isPending` prop from `PreskoFormItem` into your custom component if it needs to manage its own visual loading indicator more directly. Your component would need to declare `isPending` as a prop.
+
+### Debouncing Asynchronous Validations
+
+The `inputDebounceMs` option (configured on `<PreskoForm>` or `useFormValidation`) also applies to asynchronous validations triggered by the `onInput` event. This helps prevent excessive calls to your async validators while the user is actively typing.
 
 ## Styling and Customization
 
@@ -451,6 +605,7 @@ If your custom input component (e.g., `AppInput`) is set up to receive an `error
       :value="modelValue"
       @input="$emit('update:modelValue', $event.target.value)"
       @blur="$emit('blur')"
+      v-bind="$attrs" <!-- Important for aria-busy and other attributes -->
     />
     <div v-if="error && errorMessages" class="error-text-style">
       <!-- 'errorMessages' from errorProps.errorMessages -->
@@ -472,6 +627,7 @@ defineProps([
   "errorMessages",
   "touched",
   "dirty",
+  "isPending" // If you want to use it directly in the component
 ]);
 defineEmits(["update:modelValue", "blur"]);
 </script>
@@ -485,6 +641,11 @@ defineEmits(["update:modelValue", "blur"]);
   color: red;
   font-size: 0.875em;
   margin-top: 4px;
+}
+input[aria-busy="true"] {
+  /* Example styling for pending input */
+  opacity: 0.7;
+  /* Add a spinner or other visual cue if desired */
 }
 </style>
 ```
@@ -535,6 +696,7 @@ You can configure the names of the props that your custom input component expect
       :value="modelValue"
       @input="$emit('update:modelValue', $event.target.value)"
       @blur="$emit('blur')"
+      v-bind="$attrs" <!-- Important -->
     />
     <div v-if="error && errorMessages" class="error-text-style">
       {{
@@ -554,6 +716,7 @@ defineProps({
   errorMessages: [String, Array], // Mapped by errorProps.errorMessages
   touched: Boolean, // Received from PreskoFormItem, mapped by fieldStateProps.isTouched
   dirty: Boolean, // Received from PreskoFormItem, mapped by fieldStateProps.isDirty
+  isPending: Boolean, // If you want to use it directly in the component
 });
 defineEmits(["update:modelValue", "blur"]);
 </script>
@@ -574,6 +737,9 @@ defineEmits(["update:modelValue", "blur"]);
   color: red;
   font-size: 0.875em;
   margin-top: 4px;
+}
+input[aria-busy="true"] {
+  opacity: 0.7;
 }
 </style>
 ```
@@ -606,6 +772,8 @@ This section details the props, events, and slots for the main `<PreskoForm>` co
 | `submitBtnProps`   | Object | `undefined`                                              | No       | An object of props to pass to the `submitComponent`.                                                                                                   |
 | `errorProps`       | Object | `{ hasErrors: "error", errorMessages: "errorMessages" }` | No       | Configures the prop names used to pass validation state (error status and messages) to each `PreskoFormItem` and thus to your custom input components. |
 | `fieldStateProps`  | Object | `{ isTouched: 'touched', isDirty: 'dirty' }`             | No       | Configures the prop names used to pass `isTouched` and `isDirty` boolean states to each rendered field component.                                      |
+| `validationTrigger`| String | `'onBlur'`                                               | No       | When to trigger validation: `'onSubmit'`, `'onBlur'`, `'onInput'`.                                                                                       |
+| `inputDebounceMs`  | Number | `100`                                                    | No       | Debounce time in ms for `'onInput'` validation trigger.                                                                                                |
 
 ### Events
 
@@ -616,15 +784,17 @@ This section details the props, events, and slots for the main `<PreskoForm>` co
 | `submit:reject`     | `undefined`                                  | Emitted when the form is submitted but fails validation.                                                                                       |
 | `field:touched`     | `{ propertyName: string, touched: boolean }` | Emitted when a field's touched state changes. Typically becomes `true` after the field loses focus for the first time, or on a submit attempt. |
 | `field:dirty`       | `{ propertyName: string, dirty: boolean }`   | Emitted when a field's dirty state changes (i.e., its value is different from its initial value, or reverts to being the same).                |
+| `field:pending`     | `{ propertyName: string, pending: boolean }` | Emitted when a field's asynchronous validation pending state changes.                                                                          |
+
 
 ### Slots
 
 | Name            | Scoped | Description                                                                                                                                                                                                                                                                                                                                                                                    |
 | --------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| (default)       | Yes    | Wraps the main content of the form (title, fields wrapper, submit row, and default-extra slot). Exposes form-level states: `isFormDirty` (boolean) and `isFormTouched` (boolean). Can be used to display messages or controls based on overall form state. Example: `<PreskoForm v-slot="{ isFormDirty, isFormTouched }"> ... <div v-if="isFormDirty">Unsaved changes</div> ... </PreskoForm>` |
+| (default)       | Yes    | Wraps the main content of the form (title, fields wrapper, submit row, and default-extra slot). Exposes form-level states: `isFormDirty` (boolean), `isFormTouched` (boolean), and `isFormPending` (boolean). Can be used to display messages or controls based on overall form state. Example: `<PreskoForm v-slot="{ isFormDirty, isFormTouched, isFormPending }"> ... <div v-if="isFormPending">Form is busy...</div> ... </PreskoForm>` |
 | `title`         | No     | Allows providing a custom component or HTML structure for the form's title, replacing the default display via the `title` prop. This slot is rendered _inside_ the default scoped slot.                                                                                                                                                                                                        |
-| `submit-row`    | Yes    | Allows providing a custom layout for the entire row containing the submit button. Exposes `isFormDirty` and `isFormTouched` states. Useful for adding other controls or conditionally styling the submit area. This slot is rendered _inside_ the default scoped slot.                                                                                                                         |
-| `default-extra` | Yes    | An additional slot at the very end of the form, after the submit row. Also exposes `isFormDirty` and `isFormTouched` states. This slot is rendered _inside_ the default scoped slot.                                                                                                                                                                                                           |
+| `submit-row`    | Yes    | Allows providing a custom layout for the entire row containing the submit button. Exposes `isFormDirty`, `isFormTouched`, and `isFormPending` states. Useful for adding other controls or conditionally styling the submit area. This slot is rendered _inside_ the default scoped slot.                                                                                                                         |
+| `default-extra` | Yes    | An additional slot at the very end of the form, after the submit row. Also exposes `isFormDirty`, `isFormTouched`, and `isFormPending` states. This slot is rendered _inside_ the default scoped slot.                                                                                                                                                                                                           |
 
 ## Further Examples
 
@@ -640,10 +810,11 @@ and how a custom input component can react to `touched` and `dirty` states passe
     :fields="formFields"
     submit-component="MySubmitButton"
     :field-state-props="{ isTouched: 'touched', isDirty: 'dirty' }"
-    v-slot="{ isFormDirty, isFormTouched }"
+    v-slot="{ isFormDirty, isFormTouched, isFormPending }"
     @submit="handleSubmit"
     @field:touched="logEvent"
     @field:dirty="logEvent"
+    @field:pending="logEvent"
   >
     <!-- PreskoForm will render fields here using PreskoFormItem -->
     <!-- Each MyCustomInput will receive 'touched' and 'dirty' props -->
@@ -652,10 +823,11 @@ and how a custom input component can react to `touched` and `dirty` states passe
       No changes made yet.
     </p>
     <p v-if="isFormDirty" class="warning-message">You have unsaved changes!</p>
+    <p v-if="isFormPending" class="pending-message">Validating form...</p>
 
-    <template #submit-row="{ isFormDirty: submitRowIsDirty }">
-      <MySubmitButton :disabled="!submitRowIsDirty" />
-      <!-- Example: Disable submit if form is not dirty -->
+    <template #submit-row="{ isFormDirty: submitRowIsDirty, isFormPending: submitRowIsPending }">
+      <MySubmitButton :disabled="!submitRowIsDirty || submitRowIsPending" />
+      <!-- Example: Disable submit if form is not dirty or is pending -->
     </template>
   </PreskoForm>
   <pre>Form Data: {{ formData }}</pre>
@@ -714,6 +886,13 @@ const logEvent = (eventPayload) => {
   margin-bottom: 10px;
   border-radius: 4px;
 }
+.pending-message {
+  background-color: #f0f0f0;
+  border: 1px solid #ccc;
+  padding: 8px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+}
 </style>
 
 <!-- Conceptual MyCustomInput.vue -->
@@ -725,12 +904,14 @@ const logEvent = (eventPayload) => {
       :value="modelValue"
       @input="$emit('update:modelValue', $event.target.value)"
       @blur="$emit('blur')"
+      :aria-busy="isPending"
     />
     <p v-if="error && errorMessages" style="color:red; font-size:0.8em;">{{ errorMessages }}</p>
+    <p v-if="isPending">Loading...</p>
   </div>
 </template>
 <script setup>
-// defineProps(['modelValue', 'label', 'touched', 'dirty', 'error', 'errorMessages']);
+// defineProps(['modelValue', 'label', 'touched', 'dirty', 'error', 'errorMessages', 'isPending']);
 // defineEmits(['update:modelValue', 'blur']);
 </script>
 <style scoped>
@@ -798,6 +979,7 @@ const handleLogin = (data) => {
       :value="modelValue"
       @input="$emit('update:modelValue', $event.target.value)"
       @blur="$emit('blur')"
+      :aria-busy="isPending" <!-- Assuming isPending is also passed or handled via $attrs -->
     />
     <p v-if="isInvalid && validationIssues" style="color:darkred; font-size:0.8em;">{{ validationIssues }}</p>
   </div>
@@ -805,35 +987,27 @@ const handleLogin = (data) => {
 <script setup>
 // defineProps(['modelValue', 'label', 'type',
 //              'isInvalid', 'validationIssues',
-//              'interactedWith', 'dataModified']);
+//              'interactedWith', 'dataModified', 'isPending']);
 // defineEmits(['update:modelValue', 'blur']);
 </script>
 -->
 ```
 
-## Advanced Usage (Placeholder)
+## Advanced Usage
 
 This section can be expanded with more complex use cases and customization examples. Potential topics include:
 
 - **Creating Complex Custom Input Components:**
-
   - In-depth guide on building custom input components that fully integrate with `PreskoForm`'s validation and `v-model` (e.g., components with their own internal state, complex UI, or specific data transformation needs).
-  - Examples of components like custom select/dropdowns with search, date pickers, or file uploads.
-
+  - Examples of components like custom select/dropdowns with search, date pickers, or file uploads that correctly handle `aria-busy` and other passed attributes.
 - **Advanced Validation Scenarios:**
-
-  - Implementing asynchronous validation rules.
-  - Cross-field validation (validating one field based on the value of another).
+  - More examples of asynchronous validation rules (see "Asynchronous Validation" section).
+  - Cross-field validation (validating one field based on the value of another, covered in "Asynchronous Validation" with `ctx.getValue`).
   - Dynamically changing validation rules based on other form states.
-
 - **Integrating with State Management Libraries:**
-
   - Patterns for using `PreskoForm` with state management solutions like Pinia or Vuex.
-
 - **Performance Considerations for Very Large Forms:**
-
   - Tips and best practices if dealing with exceptionally large or complex form configurations.
-
 - **Extending `useFormValidation`:**
   - Guidance on potentially extending or wrapping the `useFormValidation` composable for highly specific needs.
 

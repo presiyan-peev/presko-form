@@ -120,6 +120,15 @@ const props = defineProps({
     default: false,
   },
   /**
+   * The pending state of the field's asynchronous validation.
+   * @type {boolean}
+   * @default false
+   */
+  isPending: {
+    type: Boolean,
+    default: false,
+  },
+  /**
    * Configuration for mapping touched and dirty states to props on the child component.
    * @type {FieldStatePropsConfig}
    * @default { isTouched: 'touched', isDirty: 'dirty' }
@@ -204,6 +213,7 @@ const combinedProps = computed(() => {
     [props.errorProps.errorMessages]: props.validityState.errMsg,
     [props.fieldStateProps.isTouched]: props.isTouched,
     [props.fieldStateProps.isDirty]: props.isDirty,
+    'aria-busy': props.isPending, // Added for async validation pending state
   };
 });
 

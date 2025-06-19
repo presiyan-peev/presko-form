@@ -939,3 +939,175 @@ describe("PreskoForm.vue", () => {
     });
   });
 });
+
+// --- BEGIN ASYNC VALIDATION UI TESTS ---
+describe("PreskoForm.vue - Asynchronous Validation UI Feedback", () => {
+  let mockValidationState;
+
+  // Simplified stubs for this test suite
+  const AsyncStubInput = defineComponent({
+    name: "AsyncStubInput",
+    props: ["modelValue", "isPending", "aria-busy"], // PreskoFormItem will pass isPending, aria-busy
+    emits: ["update:modelValue", "blur", "input"],
+    template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" :aria-busy="isPending || $attrs[\'aria-busy\']" />',
+  });
+
+  const AsyncStubSubmit = defineComponent({
+    name: "AsyncStubSubmit",
+    props: ["disabled"],
+    template: '<button type="submit" :disabled="disabled">Submit</button>',
+  });
+
+  const getAsyncFieldsConfig = () => [
+    {
+      propertyName: "name",
+      label: "Name",
+      component: AsyncStubInput, // Use a component that can reflect pending state
+      validators: [() => new Promise(() => {})], // Validator that never resolves for manual pending control
+    },
+  ];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    // Reset and re-mock useFormValidation for each test
+    // This allows us to control the pending states directly from the test
+    mockValidationState = {
+      formFieldsValues: reactive({}),
+      formFieldsValidity: reactive({}),
+      formFieldsErrorMessages: reactive({}),
+      formFieldsTouchedState: reactive({}),
+      formFieldsDirtyState: reactive({}),
+      formFieldsPendingState: reactive({}), // Key for async tests
+      isFormPending: ref(false),          // Key for async tests
+      validateField: vi.fn(),
+      validateFormPurely: vi.fn().mockReturnValue(true),
+      setFieldTouched: vi.fn(),
+      checkFieldDirty: vi.fn(),
+      updateFieldInitialValue: vi.fn(),
+      triggerValidation: vi.fn(),
+      resetValidationState: vi.fn(),
+      addItem: vi.fn(),
+      removeItem: vi.fn(),
+    };
+
+    // Mock the composable globally for all tests in this describe block
+    vi.mock("../composables/useFormValidation", () => ({
+      useFormValidation: vi.fn(() => mockValidationState),
+    }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks(); // This will also clear the mock for useFormValidation
+    vi.resetModules(); // Ensure modules are reset, especially the mocked one
+  });
+
+  const mountFormWithAsync = (props = {}, initialModel = {}) => {
+    const model = reactive({ name: "", ...initialModel });
+    return mount(PreskoForm, {
+      props: {
+        fields: getAsyncFieldsConfig(),
+        submitComponent: AsyncStubSubmit,
+        modelValue: model,
+        ...props,
+      },
+      global: {
+        // Components passed via field.component don't need global stubs here
+      },
+    });
+  };
+
+  it("propagates isFormPending to default and submit-row slots", async () => {
+    const wrapper = mountFormWithAsync();
+
+    // Check initial slot props
+    // Accessing slot props directly is tricky. We test by effect (e.g. submit button disabled)
+    // or by providing a custom slot content that exposes them.
+    // For this test, we'll rely on the submit button test to confirm isFormPending effect.
+    // And we can check the component's own isFormPending if it's exposed (it is via useFormValidation).
+
+    mockValidationState.isFormPending.value = true;
+    await nextTick();
+
+    // Example of testing slot prop by providing custom slot content:
+    const wrapperWithCustomSlot = mount(PreskoForm, {
+      props: {
+        fields: getAsyncFieldsConfig(),
+        submitComponent: AsyncStubSubmit,
+        modelValue: reactive({ name: "" }),
+      },
+      slots: {
+        'submit-row': `<template #submit-row="{ isFormPending }">
+                        <div data-test-is-form-pending="{{ isFormPending }}"></div>
+                      </template>`
+      }
+    });
+    mockValidationState.isFormPending.value = true;
+    await nextTick();
+    expect(wrapperWithCustomSlot.find('[data-test-is-form-pending="true"]').exists()).toBe(true);
+
+    mockValidationState.isFormPending.value = false;
+    await nextTick();
+    expect(wrapperWithCustomSlot.find('[data-test-is-form-pending="false"]').exists()).toBe(true);
+  });
+
+  it("disables submit button when isFormPending is true", async () => {
+    const wrapper = mountFormWithAsync();
+    const submitButton = wrapper.findComponent(AsyncStubSubmit);
+
+    expect(submitButton.props("disabled")).toBe(false);
+
+    mockValidationState.isFormPending.value = true;
+    await nextTick();
+    expect(submitButton.props("disabled")).toBe(true);
+
+    mockValidationState.isFormPending.value = false;
+    await nextTick();
+    expect(submitButton.props("disabled")).toBe(false);
+  });
+
+  it("passes isPending=true to PreskoFormItem when its field is pending", async () => {
+    // We need PreskoFormItem not to be stubbed for this test, or to have a testable prop.
+    // The default mount doesn't stub PreskoFormItem.
+    const wrapper = mountFormWithAsync();
+
+    mockValidationState.formFieldsPendingState.name = true;
+    await nextTick();
+
+    const formItem = wrapper.findComponent({ name: 'PreskoFormItem' }); // Find by name or other selector
+    expect(formItem.exists()).toBe(true);
+    expect(formItem.props("isPending")).toBe(true);
+
+    // Also check aria-busy on the input through the formItem's child
+    const inputComponent = formItem.findComponent(AsyncStubInput);
+    expect(inputComponent.attributes('aria-busy')).toBe('true');
+
+
+    mockValidationState.formFieldsPendingState.name = false;
+    await nextTick();
+    expect(formItem.props("isPending")).toBe(false);
+    expect(inputComponent.attributes('aria-busy')).toBe('false');
+  });
+
+  it("emits 'field:pending' event when a field's pending state changes", async () => {
+    const wrapper = mountFormWithAsync();
+
+    // Simulate field 'name' starting to pend
+    mockValidationState.formFieldsPendingState.name = true;
+    // isFormPending might also change, let's simulate that too
+    mockValidationState.isFormPending.value = true;
+    await nextTick(); // Allow watcher in PreskoForm to react
+
+    expect(wrapper.emitted()["field:pending"]).toBeTruthy();
+    expect(wrapper.emitted()["field:pending"][0]).toEqual([{ propertyName: "name", pending: true }]);
+
+    // Simulate field 'name' stopping to pend
+    mockValidationState.formFieldsPendingState.name = false;
+    mockValidationState.isFormPending.value = false;
+    await nextTick();
+
+    expect(wrapper.emitted()["field:pending"].length).toBe(2);
+    expect(wrapper.emitted()["field:pending"][1]).toEqual([{ propertyName: "name", pending: false }]);
+  });
+});
+// --- END ASYNC VALIDATION UI TESTS ---

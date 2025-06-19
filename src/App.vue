@@ -10,11 +10,42 @@ import PreskoForm from "./components/PreskoForm.vue";
 const preskoFormRef = ref(null);
 const showFeedback = ref(true);
 
+const checkEventName = (value) => {
+  console.log("checkEventName called with value:", value);
+  return new Promise((resolve) => {
+    if (!value) {
+      console.log("checkEventName: empty value, resolving true");
+      resolve(true);
+      return;
+    }
+    console.log("checkEventName: starting async validation for:", value);
+    // Simulate a network request with a 1-second delay
+    setTimeout(() => {
+      // 50% chance to report the name as taken
+      const isTaken = Math.random() < 0.5;
+      console.log(
+        "checkEventName: validation result for",
+        value,
+        "- taken:",
+        isTaken
+      );
+      if (isTaken) {
+        console.log("checkEventName: resolving with error");
+        resolve("Event name is already taken.");
+      } else {
+        console.log("checkEventName: resolving as valid");
+        resolve(true);
+      }
+    }, 1000);
+  });
+};
+
 const fieldsConfig = ref([
   {
     propertyName: "eventName",
     component: "AppInput", // Using string names for components
     rules: ["required", "string"],
+    validators: [checkEventName],
     value: "Tech Conference 2024",
     props: {
       label: "Event Name",
