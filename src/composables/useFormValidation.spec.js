@@ -710,3 +710,347 @@ describe("useFormValidation", () => {
     });
   });
 });
+
+// --- BEGIN ASYNC VALIDATION TESTS ---
+describe("useFormValidation - Asynchronous Validation", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks(); // Clear mocks, including any previous implementations
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const getAsyncFieldsConfig = (asyncValidatorMock) => [
+    {
+      propertyName: "asyncField",
+      label: "Async Field",
+      validators: [asyncValidatorMock],
+      value: "",
+    },
+    {
+      propertyName: "otherField",
+      label: "Other Field",
+      value: "initialOtherValue",
+    },
+    {
+      propertyName: "anotherAsyncField",
+      label: "Another Async Field",
+      validators: [asyncValidatorMock], // Can use the same mock or a different one
+      value: "",
+    }
+  ];
+
+  it("should correctly update state for a successful async validator", async () => {
+    const asyncValidatorMock = vi.fn().mockResolvedValue(true);
+    const fields = getAsyncFieldsConfig(asyncValidatorMock);
+    const {
+      validateField,
+      formFieldsValidity,
+      formFieldsErrorMessages,
+      formFieldsPendingState,
+      isFormPending,
+    } = useFormValidation(fields);
+
+    const model = reactive({ asyncField: "test" });
+    const validationPromise = validateField("asyncField", model.asyncField, model);
+
+    expect(formFieldsPendingState.asyncField).toBe(true);
+    expect(isFormPending.value).toBe(true); // isFormPending is a computed ref
+
+    await vi.advanceTimersByTimeAsync(0); // Allow promises to start resolving
+    await validationPromise;             // Wait for the validation to complete
+
+    expect(asyncValidatorMock).toHaveBeenCalled();
+    expect(formFieldsValidity.asyncField).toBeUndefined(); // Valid
+    expect(formFieldsErrorMessages.asyncField).toBeUndefined();
+    expect(formFieldsPendingState.asyncField).toBe(false);
+    expect(isFormPending.value).toBe(false);
+  });
+
+  it("should correctly update state for a failing async validator (resolves with error message)", async () => {
+    const errorMsg = "Async validation failed";
+    const asyncValidatorMock = vi.fn().mockResolvedValue(errorMsg);
+    const fields = getAsyncFieldsConfig(asyncValidatorMock);
+    const {
+      validateField,
+      formFieldsValidity,
+      formFieldsErrorMessages,
+      formFieldsPendingState,
+      isFormPending,
+    } = useFormValidation(fields);
+
+    const model = reactive({ asyncField: "test" });
+    const validationPromise = validateField("asyncField", model.asyncField, model);
+
+    expect(formFieldsPendingState.asyncField).toBe(true);
+    expect(isFormPending.value).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await validationPromise;
+
+    expect(formFieldsValidity.asyncField).toBe(false); // Invalid
+    expect(formFieldsErrorMessages.asyncField).toBe(errorMsg);
+    expect(formFieldsPendingState.asyncField).toBe(false);
+    expect(isFormPending.value).toBe(false);
+  });
+
+  it("should correctly update state when an async validator promise rejects", async () => {
+    const rejectionError = new Error("Network Failure");
+    const asyncValidatorMock = vi.fn().mockRejectedValue(rejectionError);
+    const fields = getAsyncFieldsConfig(asyncValidatorMock);
+    const {
+      validateField,
+      formFieldsValidity,
+      formFieldsErrorMessages,
+      formFieldsPendingState,
+      isFormPending,
+    } = useFormValidation(fields);
+
+    const model = reactive({ asyncField: "test" });
+    const validationPromise = validateField("asyncField", model.asyncField, model);
+
+    expect(formFieldsPendingState.asyncField).toBe(true);
+    expect(isFormPending.value).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(0); // Allow promises to start processing
+    // No need to `await validationPromise` here if we want to test the state after rejection is handled internally
+    // However, validateField itself might not throw, but handle the rejection.
+    // Let's await it to ensure all internal handling is done.
+    try {
+      await validationPromise;
+    } catch (e) {
+      // This catch block might not be reached if validateField handles the rejection internally.
+    }
+
+
+    expect(formFieldsValidity.asyncField).toBe(false); // Invalid due to rejection
+    expect(formFieldsErrorMessages.asyncField).toBe(rejectionError.message); // Or a generic message
+    expect(formFieldsPendingState.asyncField).toBe(false);
+    expect(isFormPending.value).toBe(false);
+  });
+
+  it("isFormPending should reflect multiple pending fields", async () => {
+    const validator1 = vi.fn(() => new Promise(resolve => setTimeout(() => resolve(true), 50)));
+    const validator2 = vi.fn(() => new Promise(resolve => setTimeout(() => resolve(true), 100)));
+
+    const fields = [
+      { propertyName: "field1", validators: [validator1], value: "" },
+      { propertyName: "field2", validators: [validator2], value: "" },
+    ];
+    const { validateField, formFieldsPendingState, isFormPending } = useFormValidation(fields);
+    const model = reactive({ field1: "val1", field2: "val2" });
+
+    const promise1 = validateField("field1", model.field1, model);
+    expect(isFormPending.value).toBe(true);
+    expect(formFieldsPendingState.field1).toBe(true);
+
+    const promise2 = validateField("field2", model.field2, model);
+    expect(isFormPending.value).toBe(true);
+    expect(formFieldsPendingState.field1).toBe(true);
+    expect(formFieldsPendingState.field2).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(50); // validator1 resolves
+    await promise1;
+    expect(formFieldsPendingState.field1).toBe(false);
+    expect(formFieldsPendingState.field2).toBe(true); // field2 still pending
+    expect(isFormPending.value).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(50); // validator2 resolves
+    await promise2;
+    expect(formFieldsPendingState.field1).toBe(false);
+    expect(formFieldsPendingState.field2).toBe(false);
+    expect(isFormPending.value).toBe(false);
+  });
+
+  it("ValidationCtx.getValue should provide access to other field values", async () => {
+    const otherFieldValue = "expected value from other field";
+    const asyncValidatorMock = vi.fn(async (value, label, field, ctx) => {
+      const otherVal = ctx.getValue("otherField");
+      expect(otherVal).toBe(otherFieldValue);
+      return true;
+    });
+
+    const fields = getAsyncFieldsConfig(asyncValidatorMock);
+    const { validateField } = useFormValidation(fields);
+    const model = reactive({ asyncField: "test", otherField: otherFieldValue });
+
+    await validateField("asyncField", model.asyncField, model);
+    expect(asyncValidatorMock).toHaveBeenCalled();
+  });
+
+  it("resetValidationState should abort pending async validations and reset pending states", async () => {
+    const abortFn = vi.fn();
+    const asyncValidatorMock = vi.fn(async (value, label, field, ctx) => {
+      ctx.abortSignal.addEventListener('abort', abortFn);
+      return new Promise(resolve => setTimeout(() => resolve(true), 100)); // Long running
+    });
+
+    const fields = getAsyncFieldsConfig(asyncValidatorMock);
+    const { validateField, resetValidationState, formFieldsPendingState, isFormPending } = useFormValidation(fields);
+    const model = reactive({ asyncField: "test" });
+
+    const validationPromise = validateField("asyncField", model.asyncField, model);
+    expect(formFieldsPendingState.asyncField).toBe(true);
+    expect(isFormPending.value).toBe(true);
+
+    resetValidationState("asyncField");
+
+    expect(abortFn).toHaveBeenCalled();
+    expect(formFieldsPendingState.asyncField).toBe(false);
+    expect(isFormPending.value).toBe(false);
+
+    // The original promise might still resolve/reject but its result should be ignored by validateField
+    // due to validationRunId or abort signal checks.
+    await vi.advanceTimersByTimeAsync(100);
+    await validationPromise.catch(() => {}); // Catch if it rejects due to abort, or wait if it resolves
+  });
+
+  it("ValidationCtx.abortSignal should abort previous validation when a new one starts", async () => {
+    const firstValidationAbortHandler = vi.fn();
+    let firstValidatorResolver;
+    const firstValidator = vi.fn(async (value, label, field, ctx) => {
+      ctx.abortSignal.addEventListener("abort", firstValidationAbortHandler);
+      return new Promise((resolve) => { firstValidatorResolver = resolve; }); // Doesn't resolve immediately
+    });
+
+    const secondValidator = vi.fn().mockResolvedValue("Second validation done");
+
+    const fields = [
+      { propertyName: "testField", validators: [firstValidator], value: "initial" }
+    ];
+    const { validateField, formFieldsErrorMessages } = useFormValidation(fields);
+    const model = reactive({ testField: "initial" });
+
+    // Start first validation
+    const firstPromise = validateField("testField", model.testField, model);
+
+    // Immediately start second validation for the same field, but with a different validator setup for this test
+    // In a real scenario, it would be the same field config, but validateField is called again.
+    fields[0].validators = [secondValidator]; // Swap validator for the second call
+    model.testField = "newValue";
+    const secondPromise = validateField("testField", model.testField, model);
+
+    // The first validator's abort signal should have been triggered
+    expect(firstValidationAbortHandler).toHaveBeenCalled();
+
+    // Resolve the first validator (e.g. if it didn't handle abort internally and still resolved)
+    if (firstValidatorResolver) firstValidatorResolver(true);
+
+    await firstPromise.catch(()=>{}); // Catch potential abort error if it throws
+    await secondPromise;
+
+    // The state should reflect the second validation's outcome
+    expect(formFieldsErrorMessages.testField).toBe("Second validation done");
+    expect(secondValidator).toHaveBeenCalled();
+  });
+
+  it("should handle race conditions, applying only the result of the latest validation", async () => {
+    let resolveFirstValidation;
+    const firstValidator = vi.fn(async () => {
+      return new Promise(resolve => {
+        resolveFirstValidation = () => resolve("Error from first"); // Slower, resolves to error
+      });
+    });
+
+    const secondValidator = vi.fn(async () => {
+      await new Promise(r => setTimeout(r, 10)); // Faster, resolves to valid
+      return true;
+    });
+
+    const fields = [
+      { propertyName: "raceField", validators: [firstValidator], value: "value1" }
+    ];
+
+    const { validateField, formFieldsValidity, formFieldsErrorMessages, formFieldsPendingState } = useFormValidation(fields);
+    const model = reactive({ raceField: "value1" });
+
+    // Trigger first validation (slower)
+    const promise1 = validateField("raceField", model.raceField, model);
+
+    // Immediately trigger second validation (faster) for the same field but with different validator logic for the test
+    fields[0].validators = [secondValidator]; // Change validator for second call
+    model.raceField = "value2"; // Change value for second call
+    const promise2 = validateField("raceField", model.raceField, model);
+
+    // Resolve the first validation (slower one) AFTER the second one has already started and potentially finished
+    if(resolveFirstValidation) resolveFirstValidation();
+
+    await promise2; // Second (faster) promise should complete
+    await promise1.catch(() => {}); // First (slower) promise might be aborted or its result ignored
+
+    // The state should reflect the outcome of the LATEST validation call (secondValidator -> true)
+    expect(formFieldsValidity.raceField).toBeUndefined(); // Valid
+    expect(formFieldsErrorMessages.raceField).toBeUndefined();
+    expect(formFieldsPendingState.raceField).toBe(false);
+  });
+
+  describe("List Fields with Async Validators", () => {
+    it("should handle async validation for fields within list items", async () => {
+      const asyncListValidator = vi.fn();
+      const listFieldsConfig = [
+        {
+          propertyName: "items",
+          type: "list",
+          fields: [
+            { propertyName: "name", label: "Item Name", validators: [asyncListValidator], value: "" }
+          ],
+        },
+      ];
+      const { validateField, formFieldsValidity, formFieldsPendingState, addItem } = useFormValidation(listFieldsConfig);
+
+      addItem("items", { name: "Test Item 1" }); // Adds one item
+      const model = reactive({ items: [{ name: "Test Item 1" }] });
+
+
+      asyncListValidator.mockResolvedValueOnce(true);
+      const p1 = validateField("items[0].name", model.items[0].name, model);
+      expect(formFieldsPendingState["items[0].name"]).toBe(true);
+      await p1;
+      expect(formFieldsPendingState["items[0].name"]).toBe(false);
+      expect(formFieldsValidity["items[0].name"]).toBeUndefined();
+
+
+      addItem("items", { name: "Test Item 2" });
+      model.items.push({ name: "Test Item 2" });
+
+      asyncListValidator.mockResolvedValueOnce("Item 2 is invalid");
+      const p2 = validateField("items[1].name", model.items[1].name, model);
+      expect(formFieldsPendingState["items[1].name"]).toBe(true);
+      await p2;
+      expect(formFieldsPendingState["items[1].name"]).toBe(false);
+      expect(formFieldsValidity["items[1].name"]).toBe(false);
+    });
+
+    it("removeItem should clean up pending state and abort controller for list item fields", async () => {
+      const abortFn = vi.fn();
+      const asyncListValidator = vi.fn(async (value, label, field, ctx) => {
+        ctx.abortSignal.addEventListener('abort', abortFn);
+        return new Promise(resolve => setTimeout(() => resolve(true), 100));
+      });
+
+      const listFieldsConfig = [
+        {
+          propertyName: "items",
+          type: "list",
+          fields: [ { propertyName: "name", validators: [asyncListValidator], value: "" } ],
+        },
+      ];
+      const { validateField, removeItem, formFieldsPendingState, addItem } = useFormValidation(listFieldsConfig);
+
+      addItem("items", { name: "Item To Remove" });
+      const model = reactive({ items: [{ name: "Item To Remove" }] });
+
+      validateField("items[0].name", model.items[0].name, model);
+      expect(formFieldsPendingState["items[0].name"]).toBe(true);
+
+      removeItem("items", 0); // Remove the item while its validation is pending
+
+      expect(abortFn).toHaveBeenCalled();
+      expect(formFieldsPendingState["items[0].name"]).toBe(false); // Or undefined if key is deleted
+    });
+  });
+});
+// --- END ASYNC VALIDATION TESTS ---

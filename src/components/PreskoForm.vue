@@ -7,8 +7,9 @@
       @slot Default scoped slot for form content.
       @binding {boolean} isFormDirty - True if any field in the form is dirty.
       @binding {boolean} isFormTouched - True if any field in the form has been touched.
+      @binding {boolean} isFormPending - True if any field in the form is undergoing async validation.
     -->
-    <slot :isFormDirty="isFormDirty" :isFormTouched="isFormTouched">
+    <slot :isFormDirty="isFormDirty" :isFormTouched="isFormTouched" :isFormPending="isFormPending">
       <form class="presko-form" @submit.prevent.stop="handleFormSubmit">
         <!--
           @slot Named slot for a custom form title.
@@ -25,7 +26,6 @@
             <!-- Skip rendering if field is hidden -->
             <template v-if="isFieldVisible(field)">
               <!-- Sub-Form Rendering -->
-              <!-- Corrected ref handling for arrays -->
               <PreskoForm
                 v-if="field.subForm"
                 :ref="(el) => el && subFormRefs.push(el)"
@@ -70,7 +70,6 @@
                     Add {{ field.itemLabel || "Item" }}
                   </button>
                 </div>
-                <!-- Consider a more robust key if items can be reordered significantly and have unique IDs -->
                 <div
                   v-for="(item, index) in modelValue[field.propertyName]"
                   :key="index"
@@ -107,6 +106,11 @@
                       "
                       :isDirty="
                         formFieldsDirtyState[
+                          `${props.pathPrefix}${field.propertyName}[${index}].${listItemField.propertyName}`
+                        ] || false
+                      "
+                      :isPending="
+                        formFieldsPendingState[
                           `${props.pathPrefix}${field.propertyName}[${index}].${listItemField.propertyName}`
                         ] || false
                       "
@@ -167,6 +171,7 @@
                     `${props.pathPrefix}${field.propertyName}`
                   ] || false
                 "
+                :isPending="formFieldsPendingState[`${props.pathPrefix}${field.propertyName}`] || false"
                 :fieldStateProps="props.fieldStateProps"
                 :fieldPath="`${props.pathPrefix}${field.propertyName}`"
                 :validity-state="{
@@ -193,15 +198,18 @@
           @slot Named scoped slot for the submit button area.
           @binding {boolean} isFormDirty - True if any field in the form is dirty.
           @binding {boolean} isFormTouched - True if any field in the form has been touched.
+          @binding {boolean} isFormPending - True if any field in the form is undergoing async validation.
         -->
         <slot
           name="submit-row"
           :isFormDirty="isFormDirty"
           :isFormTouched="isFormTouched"
+          :isFormPending="isFormPending"
         >
           <component
             :is="props.submitComponent"
             v-bind="props.submitBtnProps"
+            :disabled="isFormPending || (props.submitBtnProps && props.submitBtnProps.disabled)"
             :class="props.submitBtnClasses"
           />
         </slot>
@@ -209,11 +217,13 @@
           @slot Named scoped slot for additional content at the end of the form.
           @binding {boolean} isFormDirty - True if any field in the form is dirty.
           @binding {boolean} isFormTouched - True if any field in the form has been touched.
+          @binding {boolean} isFormPending - True if any field in the form is undergoing async validation.
         -->
         <slot
           name="default-extra"
           :isFormDirty="isFormDirty"
           :isFormTouched="isFormTouched"
+          :isFormPending="isFormPending"
         ></slot>
       </form>
     </slot>
@@ -412,6 +422,11 @@ const emit = defineEmits([
    * @param {{ propertyName: string, dirty: boolean }} payload - Object containing the field's propertyName and its new dirty state.
    */
   "field:dirty",
+  /**
+   * Emitted when a field's asynchronous validation pending state changes.
+   * @param {{ propertyName: string, pending: boolean }} payload - Object containing the field's propertyName (full path) and its new pending state.
+   */
+  "field:pending",
 ]);
 
 /**
@@ -513,6 +528,10 @@ const {
   checkFieldDirty,
   updateFieldInitialValue,
   triggerValidation,
+  // --- Presko Async Validation ---
+  formFieldsPendingState,
+  isFormPending,
+  // --- End Presko Async Validation ---
 } = validationState;
 
 // Watch for changes in the modelValue to update initial values for dirty checking
@@ -576,6 +595,44 @@ watch(
   },
   { deep: true } // `immediate: false` is default for watch, which is fine here.
 );
+
+// --- Presko Async Validation ---
+// Watch for changes in formFieldsPendingState to emit field:pending event
+// Store a non-reactive copy of the previous states for comparison.
+let previousPendingStates = props.externalValidationState
+  ? {} // For nested forms, the root form handles these events by using its own validationState.
+  : { ...validationState.formFieldsPendingState };
+
+watch(
+  () => validationState.formFieldsPendingState,
+  (newStates) => {
+    // Only the root PreskoForm instance should emit these global field events.
+    if (!props.isNestedForm) {
+      const newStatesSafe = newStates || {};
+      const previousStatesSafe = previousPendingStates || {};
+
+      const allPaths = new Set([
+        ...Object.keys(newStatesSafe),
+        ...Object.keys(previousStatesSafe),
+      ]);
+
+      allPaths.forEach(path => {
+        const currentIsPending = !!newStatesSafe[path];
+        const previousIsPending = !!previousStatesSafe[path];
+        if (currentIsPending !== previousIsPending) {
+          emit("field:pending", {
+            propertyName: path, // propertyName here is the full path
+            pending: currentIsPending,
+          });
+        }
+      });
+    }
+    previousPendingStates = { ...(newStates || {}) };
+  },
+  { deep: true }
+);
+// --- End Presko Async Validation ---
+
 
 /**
  * Handles the `field-blurred` event from a `PreskoFormItem`.
@@ -1092,6 +1149,7 @@ defineExpose({
   submit: handleFormSubmit,
   addItem: handleAddItem,
   removeItem: handleRemoveItem,
+  isFormPending, // Expose isFormPending for parent access if needed
 });
 </script>
 
