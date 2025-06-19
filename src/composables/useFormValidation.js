@@ -438,7 +438,8 @@ export function useFormValidation(fields, options = {}) {
       });
       // Ensure all pending states are reset, even for fields not in formFieldsValidity yet
       Object.keys(formFieldsPendingState).forEach((key) => {
-        if (formFieldsValidity[key] === undefined) { // Only if not already handled
+        if (formFieldsValidity[key] === undefined) {
+          // Only if not already handled
           resetField(key);
         }
       });
@@ -454,12 +455,22 @@ export function useFormValidation(fields, options = {}) {
    * @param {Object} validationCtx - The validation context object.
    * @returns {Promise<true | string | string[]>} True if valid, error message(s) if invalid.
    */
-  const validateWithCustomValidator = async (field, input, fieldPath, validationCtx) => {
+  const validateWithCustomValidator = async (
+    field,
+    input,
+    fieldPath,
+    validationCtx
+  ) => {
     if (field.validators && Array.isArray(field.validators)) {
       for (const validator of field.validators) {
         if (typeof validator === "function") {
           // Pass validationCtx as the fourth argument
-          const result = validator(input, getFieldLabel(field), field, validationCtx);
+          const result = validator(
+            input,
+            getFieldLabel(field),
+            field,
+            validationCtx
+          );
           if (result instanceof Promise) {
             try {
               const promiseResult = await result;
@@ -468,7 +479,10 @@ export function useFormValidation(fields, options = {}) {
               }
             } catch (error) {
               // Handle promise rejection, e.g., network error
-              console.error(`Async validator for ${fieldPath} rejected:`, error);
+              console.error(
+                `Async validator for ${fieldPath} rejected:`,
+                error
+              );
               return (
                 (error instanceof Error ? error.message : String(error)) ||
                 `${getFieldLabel(field)} validation failed.`
@@ -587,7 +601,8 @@ export function useFormValidation(fields, options = {}) {
     }
 
     // Increment and get current validation run ID for this field
-    const currentRunId = (validationRunIds[fieldPath] = (validationRunIds[fieldPath] || 0) + 1);
+    const currentRunId = (validationRunIds[fieldPath] =
+      (validationRunIds[fieldPath] || 0) + 1);
 
     // Abort any previous validation for this field
     if (activeAbortControllers[fieldPath]) {
@@ -598,26 +613,42 @@ export function useFormValidation(fields, options = {}) {
 
     const validationCtx = {
       abortSignal: controller.signal,
-      getValue: (otherFieldPath) => getValueByPath(currentFormModel, otherFieldPath),
+      getValue: (otherFieldPath) =>
+        getValueByPath(currentFormModel, otherFieldPath),
     };
 
     // If field has no rules or validators, treat empty / undefined values as invalid (required by default logic)
     // This part remains synchronous as it's basic presence check.
-    const hasRules = Array.isArray(fieldConfig.rules) && fieldConfig.rules.length > 0;
-    const hasValidators = Array.isArray(fieldConfig.validators) && fieldConfig.validators.length > 0;
+    const hasRules =
+      Array.isArray(fieldConfig.rules) && fieldConfig.rules.length > 0;
+    const hasValidators =
+      Array.isArray(fieldConfig.validators) &&
+      fieldConfig.validators.length > 0;
 
     if (!hasRules && !hasValidators) {
       const requiredResult = Validation.isRequired
-        ? Validation.isRequired(input, getFieldLabel(fieldConfig), fieldConfig, validationCtx) // Pass ctx
+        ? Validation.isRequired(
+            input,
+            getFieldLabel(fieldConfig),
+            fieldConfig,
+            validationCtx
+          ) // Pass ctx
         : undefined;
 
       let finalRequiredResult = requiredResult;
       if (finalRequiredResult === undefined) {
-        const isPresent = !(input === null || input === undefined || (typeof input === "string" && input.trim() === ""));
-        finalRequiredResult = isPresent ? true : `${getFieldLabel(fieldConfig)} is invalid.`;
+        const isPresent = !(
+          input === null ||
+          input === undefined ||
+          (typeof input === "string" && input.trim() === "")
+        );
+        finalRequiredResult = isPresent
+          ? true
+          : `${getFieldLabel(fieldConfig)} is invalid.`;
       }
 
-      if (currentRunId === validationRunIds[fieldPath]) { // Check race condition
+      if (currentRunId === validationRunIds[fieldPath]) {
+        // Check race condition
         updateValidationState(fieldPath, finalRequiredResult);
         if (finalRequiredResult !== true) return false;
       } else {
@@ -639,13 +670,22 @@ export function useFormValidation(fields, options = {}) {
     if (hasValidators) {
       formFieldsPendingState[fieldPath] = true;
       try {
-        const customResult = await validateWithCustomValidator(fieldConfig, input, fieldPath, validationCtx);
+        const customResult = await validateWithCustomValidator(
+          fieldConfig,
+          input,
+          fieldPath,
+          validationCtx
+        );
         // Check if validation was aborted or superseded
-        if (controller.signal.aborted || currentRunId !== validationRunIds[fieldPath]) {
+        if (
+          controller.signal.aborted ||
+          currentRunId !== validationRunIds[fieldPath]
+        ) {
           // If aborted and by a newer validation, the newer one will update state.
           // If aborted by reset, pending state might be cleared by reset.
           // If simply superseded, do nothing as new validation is running/finished.
-          if (currentRunId === validationRunIds[fieldPath]) { // only clear pending if this instance was not superseded
+          if (currentRunId === validationRunIds[fieldPath]) {
+            // only clear pending if this instance was not superseded
             formFieldsPendingState[fieldPath] = false;
           }
           return false; // Indicate validation did not complete successfully for this run
@@ -657,26 +697,39 @@ export function useFormValidation(fields, options = {}) {
         }
       } catch (error) {
         // This might happen if validator itself throws, not just returns error string
-        if (currentRunId === validationRunIds[fieldPath] && !controller.signal.aborted) {
-          console.error(`Error during custom validation for ${fieldPath}:`, error);
-          updateValidationState(fieldPath, (error instanceof Error ? error.message : String(error)) || 'Validation failed');
+        if (
+          currentRunId === validationRunIds[fieldPath] &&
+          !controller.signal.aborted
+        ) {
+          console.error(
+            `Error during custom validation for ${fieldPath}:`,
+            error
+          );
+          updateValidationState(
+            fieldPath,
+            (error instanceof Error ? error.message : String(error)) ||
+              "Validation failed"
+          );
         }
         return false;
       } finally {
-        if (currentRunId === validationRunIds[fieldPath]) { // Only update pending state if this is the latest run
-            formFieldsPendingState[fieldPath] = false;
+        if (currentRunId === validationRunIds[fieldPath]) {
+          // Only update pending state if this is the latest run
+          formFieldsPendingState[fieldPath] = false;
         }
         // Clean up controller if this is the run that created it AND it's no longer the active one
         // Or if it's completed.
         if (activeAbortControllers[fieldPath] === controller) {
-             delete activeAbortControllers[fieldPath];
+          delete activeAbortControllers[fieldPath];
         }
       }
     }
 
-
     // If we get here, the field is valid (or was handled by a newer validation run)
-    if (currentRunId === validationRunIds[fieldPath] && !controller.signal.aborted) {
+    if (
+      currentRunId === validationRunIds[fieldPath] &&
+      !controller.signal.aborted
+    ) {
       updateValidationState(fieldPath, true);
     }
     return true;
@@ -701,7 +754,6 @@ export function useFormValidation(fields, options = {}) {
     let allValid = true;
 
     currentFieldsConfig.forEach((field) => {
-      const fullPath = pathPrefix + field.propertyName;
       const fullPath = pathPrefix + (field.propertyName || field.subForm); // Use subForm key if propertyName is not available
       if (!isVisible(field)) {
         // Skip validation for fields that are not visible
@@ -709,8 +761,8 @@ export function useFormValidation(fields, options = {}) {
         updateValidationState(fullPath, true);
         formFieldsPendingState[fullPath] = false;
         if (activeAbortControllers[fullPath]) {
-            activeAbortControllers[fullPath].abort();
-            delete activeAbortControllers[fullPath];
+          activeAbortControllers[fullPath].abort();
+          delete activeAbortControllers[fullPath];
         }
         return;
       }
@@ -737,18 +789,21 @@ export function useFormValidation(fields, options = {}) {
                   // Simplified synchronous check (adaptation of validateField's sync parts)
                   const fieldConfig = findFieldConfig(subFieldPath, fields);
                   if (fieldConfig && isVisible(fieldConfig)) {
-                    const rulesResult = validateWithBuiltInRules(fieldConfig, subFieldValue, subFieldPath);
+                    const rulesResult = validateWithBuiltInRules(
+                      fieldConfig,
+                      subFieldValue,
+                      subFieldPath
+                    );
                     if (rulesResult !== true) {
-                        updateValidationState(subFieldPath, rulesResult);
-                        allValid = false;
+                      updateValidationState(subFieldPath, rulesResult);
+                      allValid = false;
                     } else {
-                        // If only sync rules pass, and no async (which we skip here), it's valid for this context
-                        updateValidationState(subFieldPath, true);
+                      // If only sync rules pass, and no async (which we skip here), it's valid for this context
+                      updateValidationState(subFieldPath, true);
                     }
                   } else if (fieldConfig && !isVisible(fieldConfig)) {
-                     updateValidationState(subFieldPath, true); // Not visible is valid
+                    updateValidationState(subFieldPath, true); // Not visible is valid
                   }
-
 
                   // Original call, if validateField were synchronous:
                   // if (!validateField(subFieldPath, subFieldValue, formToValidate)) { // Pass formToValidate as currentFormModel
@@ -774,16 +829,20 @@ export function useFormValidation(fields, options = {}) {
         // Similar to list items, using a simplified synchronous check from validateField logic
         const fieldConfig = findFieldConfig(fullPath, fields);
         if (fieldConfig && isVisible(fieldConfig)) {
-            const rulesResult = validateWithBuiltInRules(fieldConfig, fieldValue, fullPath);
-            if (rulesResult !== true) {
-                updateValidationState(fullPath, rulesResult);
-                allValid = false;
-            } else {
-                 // If only sync rules pass, and no async (which we skip here), it's valid for this context
-                updateValidationState(fullPath, true);
-            }
+          const rulesResult = validateWithBuiltInRules(
+            fieldConfig,
+            fieldValue,
+            fullPath
+          );
+          if (rulesResult !== true) {
+            updateValidationState(fullPath, rulesResult);
+            allValid = false;
+          } else {
+            // If only sync rules pass, and no async (which we skip here), it's valid for this context
+            updateValidationState(fullPath, true);
+          }
         } else if (fieldConfig && !isVisible(fieldConfig)) {
-            updateValidationState(fullPath, true); // Not visible is valid
+          updateValidationState(fullPath, true); // Not visible is valid
         }
         // Original call, if validateField were synchronous:
         // if (!validateField(fullPath, fieldValue, formToValidate)) { // Pass formToValidate as currentFormModel
@@ -826,11 +885,11 @@ export function useFormValidation(fields, options = {}) {
       // by its callers (e.g., event handlers in PreskoForm).
       // The async operations within validateField will handle their own state updates.
       validateField(fieldPath, fieldValue, currentFormModel)
-        .then(isValid => {
+        .then((isValid) => {
           // Optional: handle completion of validation if needed, e.g., logging
           // console.log(`Async validation for ${fieldPath} completed. Valid: ${isValid}`);
         })
-        .catch(error => {
+        .catch((error) => {
           // This catch is for errors in the validateField orchestration itself,
           // not validation errors (which are handled by updating state).
           console.error(`Error in validation process for ${fieldPath}:`, error);
@@ -1053,7 +1112,7 @@ export function useFormValidation(fields, options = {}) {
   };
 
   const isFormPending = computed(() => {
-    return Object.values(formFieldsPendingState).some(isPending => isPending);
+    return Object.values(formFieldsPendingState).some((isPending) => isPending);
   });
 
   return {
