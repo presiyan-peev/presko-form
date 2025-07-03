@@ -23,7 +23,8 @@ export default {
   },
 };
 
-import { ref, reactive, watch, computed } from 'vue'; // Added watch and computed
+// Vue imports are already at the top of the file. This one was a duplicate.
+// import { ref, reactive, watch, computed } from 'vue';
 
 // Template for all stories
 const Template = (args, { updateArgs }) => ({
